@@ -94,7 +94,10 @@ describe('App shell', () => {
     render(<App />);
     const empty = await screen.findByTestId('fleet-empty');
     expect(empty).toHaveTextContent('No robot telemetry yet.');
-    expect(empty).toHaveTextContent('Phase 2');
+    // The detail must explain WHY it is empty, not just that it is. Asserting on
+    // 'Phase' keeps the test honest about the cause without pinning exact prose.
+    expect(empty).toHaveTextContent(/Phase\s*2/);
+    expect(empty).toHaveTextContent(/no robots publishing/i);
   });
 
   it('has landmarks and a skip link that points at a real target', async () => {

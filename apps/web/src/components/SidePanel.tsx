@@ -107,8 +107,9 @@ function FleetSection(): React.JSX.Element {
         <div className="state state--empty" data-testid="fleet-empty">
           <p>No robot telemetry yet.</p>
           <p className="state__detail">
-            The dashboard is not connected to a live feed. The MQTT → API → WebSocket path is Phase
-            2; this shell renders lot geometry only.
+            The backend&rsquo;s MQTT &rarr; API &rarr; WebSocket path works, but this shell does not
+            subscribe to it yet, and there are no robots publishing. Simulated robots arrive in
+            Phase&nbsp;2; for now the map renders lot geometry only.
           </p>
         </div>
       ) : (

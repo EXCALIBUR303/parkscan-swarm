@@ -2,10 +2,9 @@
 
 **Multi-robot autonomous parking-lot inspection and pothole-mapping — simulation-first.**
 
-> ⚠️ **Status: Phase 0 (architecture only). No implementation yet.**
-> Nothing in this repository runs. This README describes what is designed, not what exists.
-> It will be replaced with real setup instructions, real screenshots and reproducible numbers as
-> the phases land.
+> **Status: Phase 1 complete.** The foundation runs: FastAPI + PostGIS + MQTT + a React
+> dashboard shell, verified end to end on macOS 27 / Apple M5. There are **no robots yet** —
+> autonomy, perception and coordination are Phases 2–4. See [`TASKS.md`](TASKS.md).
 
 > 🔬 **All robots, sensors and detections are simulated.** There is no hardware. Every telemetry
 > and detection record carries a `data_source` / `det_source` field that is NOT NULL at the database
@@ -22,6 +21,41 @@ telemetry into PostGIS and pushes it live to a React dashboard.
 **On the word "swarm":** these are three *centrally coordinated* robots, not a decentralised swarm
 with emergent behaviour. The name is kept because it is the project's name; the architecture is a
 coordinated fleet with a central allocator, and this README will not trade on the stronger term.
+
+
+## Running it
+
+Requires macOS or Linux with [uv](https://docs.astral.sh/uv/), Node 20+, and Docker.
+
+```bash
+make bootstrap     # uv sync + npm install, creates .env
+make up            # PostGIS on host port 5433 + mosquitto on 1883
+make migrate       # apply Alembic migrations
+make smoke         # prove MQTT -> ingest -> PostGIS actually works
+make dev           # API on :8000, dashboard on :5173
+```
+
+`make help` lists every target. **Port 5433 is not a typo** — a Homebrew PostgreSQL commonly
+owns 5432, and silently connecting to the wrong database is a bad first-run experience.
+
+**Without Docker:** `brew install postgis mosquitto && make up-native`, then point
+`DATABASE_URL` in `.env` at port 5432. The stack is designed so the Docker daemon is optional;
+note that this path is documented but was not exercised in the session that built it.
+
+### Verified on this machine
+
+| Check | Result |
+|---|---|
+| `make test` (Python) | 100 passed |
+| `make test` (web) | 47 passed |
+| `ruff check` · `ruff format --check` · `mypy --strict` | clean |
+| `eslint` · `tsc --noEmit` · `vite build` | clean |
+| Alembic upgrade → downgrade → upgrade | round-trips on real PostGIS |
+| `GET /api/v1/health` over HTTP | `{"status":"ok","db":{"status":"ok"},"mqtt":{"status":"ok"}}` |
+| MQTT → ingest → PostGIS → WebSocket | delivered, `data_source: simulated` preserved |
+| Python ↔ TypeScript ENU projection | agree exactly (fixture-pinned both sides) |
+
+CI is written but has never run — there is no remote yet.
 
 ## Documentation
 

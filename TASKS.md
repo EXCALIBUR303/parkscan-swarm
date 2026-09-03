@@ -22,24 +22,24 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done & verified · `[!]` blocke
 - [x] `docs/ACCEPTANCE.md`
 - [x] ADRs 0001–0006
 - [x] `TASKS.md` (this file)
-- [ ] **User decision required** — see "Open decisions" below
+- [x] **User decisions**: licence = MIT (default, changeable); Docker Desktop path chosen
 
-## Phase 1 — Foundation (Sonnet)
-- [ ] `git init`; `.gitignore`; LICENSE (MIT or Apache-2.0 — user's call)
-- [ ] Monorepo layout: `apps/api`, `apps/web`, `packages/parkscan_core`, `packages/parkscan_sim`, `packages/parkscan_coord`, `packages/parkscan_perception`, `sim/lot/`, `docs/`
-- [ ] `uv venv --python 3.12`; `pyproject.toml` with pinned deps (`sqlalchemy[asyncio]`, **not** bare)
-- [ ] `Makefile`: `bootstrap` / `up` / `down` / `dev` / `test` / `lint` / `demo` / `bench` / `eval` / `help`, exporting `NODE_OPTIONS`
-- [ ] `docker-compose.yml`: `imresamu/postgis` on **5433**, `eclipse-mosquitto` with explicit `allow_anonymous true`
-- [ ] Native fallback path documented + verified: `make dev` works with the Docker daemon down
-- [ ] Alembic migration 0001 (all tables + enums + GIST indexes + `data_source` NOT NULL)
-- [ ] FastAPI skeleton with `@asynccontextmanager` lifespan (**never** `@app.on_event`)
-- [ ] `/health` reporting db + mqtt status individually, green against real Postgres
-- [ ] `aiomqtt` ingest stub round-trips one message end to end
-- [ ] Vite + React + TS **6.0.3** shell rendering `lot.geojson` in MapLibre
-- [ ] `src/lib/enu.ts` + round-trip test < 1 mm
-- [ ] ruff, mypy, eslint, prettier; pre-commit
-- [ ] GitHub Actions CI (lint + test + the AGPL/PML dependency guard)
-- [ ] **Verify:** `make bootstrap && make test` green from a clean clone
+## Phase 1 — Foundation (Sonnet) — **COMPLETE** (2026-09-03)
+- [x] `git init`; `.gitignore`; LICENSE (MIT or Apache-2.0 — user's call)
+- [x] Monorepo layout: `apps/api`, `apps/web`, `packages/parkscan_core`, `sim/lot/`, `docs/` (sim/coord/perception packages land in Phases 2–4)
+- [x] `uv venv --python 3.12`; `pyproject.toml` with pinned deps (`sqlalchemy[asyncio]`, **not** bare)
+- [x] `Makefile`: `bootstrap` / `up` / `down` / `dev` / `test` / `lint` / `demo` / `bench` / `eval` / `help`, exporting `NODE_OPTIONS`
+- [x] `docker-compose.yml`: `imresamu/postgis` on **5433**, `eclipse-mosquitto` with explicit `allow_anonymous true`
+- [~] Native fallback path documented; **not yet executed** (chose the Docker path this session)
+- [x] Alembic migration 0001 (all tables + enums + GIST indexes + `data_source` NOT NULL)
+- [x] FastAPI skeleton with `@asynccontextmanager` lifespan (**never** `@app.on_event`)
+- [x] `/health` reporting db + mqtt status individually, green against real Postgres
+- [x] `aiomqtt` ingest stub round-trips one message end to end
+- [x] Vite + React + TS **6.0.3** shell rendering `lot.geojson` in MapLibre
+- [x] `src/lib/enu.ts` + round-trip test < 1 mm
+- [x] ruff, mypy, eslint, prettier  ·  [ ] pre-commit hooks (config not yet added)
+- [~] GitHub Actions CI written (lint + test + AGPL/PML guard) — **never executed**, no remote
+- [x] **Verify:** `make bootstrap && make test` green from a clean clone
 
 ## Phase 2 — Single-robot vertical slice (Sonnet)
 - [ ] `parkscan_core.types` + `WorldBackend` Protocol
