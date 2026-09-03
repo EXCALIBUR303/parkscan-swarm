@@ -3,6 +3,7 @@ import { LotMap } from './components/LotMap';
 import { SidePanel } from './components/SidePanel';
 import { SimulatedBadge } from './components/SimulatedBadge';
 import { APP_NAME } from './lib/provenance';
+import { useLiveSocket } from './lib/useLiveSocket';
 import { useLot } from './lib/useLot';
 import { useDataSource } from './store';
 
@@ -13,12 +14,18 @@ import { useDataSource } from './store';
  * bolted on, and the "skip to data table" link targets a section that actually exists —
  * a skip link pointing at nothing is worse than none at all.
  *
- * `data_source` is read from the store, which `useLot` populated from the file's own
- * metadata. Nothing in this tree hardcodes the word "simulated" as the source of truth.
+ * `data_source` is read from the store, which `useLot` seeds from the lot file's own
+ * metadata and the live socket then overwrites from each telemetry frame. Nothing in
+ * this tree hardcodes the word "simulated" as the source of truth (ACCEPTANCE H1).
+ *
+ * `useLiveSocket` is called once, here, so exactly one `/ws/live` connection exists for
+ * the whole page no matter how many components read from the store.
  */
 export function App(): React.JSX.Element {
   const { status, lot, error, reload } = useLot();
   const dataSource = useDataSource();
+
+  useLiveSocket();
 
   return (
     <div className="app">

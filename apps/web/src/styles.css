@@ -16,6 +16,9 @@
   --accent: #56b4e9;
   --warn: #e69f00;
   --focus: #f0e442;
+  /* Okabe-Ito bluish green / vermillion. Never a red-vs-green pairing. */
+  --ok: #009e73;
+  --alarm: #d55e00;
 
   --space-1: 0.25rem;
   --space-2: 0.5rem;
@@ -334,9 +337,123 @@ body {
   cursor: pointer;
 }
 
+/* ------------------------------------------------------- connection status -- */
+
+/*
+ * Always visible, even when everything is fine. "No robots" and "no connection" are
+ * different facts with different fixes; the dot is never the only cue, the word next to
+ * it says the same thing.
+ */
+.conn {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-2);
+  margin-bottom: var(--space-3);
+  padding: var(--space-2);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--text-dim);
+  border-radius: 3px;
+  background: var(--bg-sunken);
+  font-size: 0.75rem;
+}
+
+.conn--open {
+  border-left-color: var(--ok);
+}
+
+.conn--connecting,
+.conn--reconnecting {
+  border-left-color: var(--accent);
+}
+
+.conn--error,
+.conn--closed {
+  border-left-color: var(--warn);
+}
+
+.conn__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-dim);
+}
+
+.conn--open .conn__dot {
+  background: var(--ok);
+}
+
+.conn--connecting .conn__dot,
+.conn--reconnecting .conn__dot {
+  background: var(--accent);
+}
+
+.conn--error .conn__dot,
+.conn--closed .conn__dot {
+  background: var(--warn);
+}
+
+.conn__run {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+}
+
+.conn__detail {
+  flex-basis: 100%;
+  color: var(--text-dim);
+}
+
+/* ------------------------------------------------------------- fleet cards -- */
+
 .fleet {
+  list-style: none;
   margin: 0;
-  padding-left: var(--space-4);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.fleet__card {
+  padding: var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--bg-sunken);
+}
+
+.fleet__id {
+  margin: 0 0 var(--space-1);
+  font-size: 0.8rem;
+}
+
+.kv--tight {
+  font-size: 0.75rem;
+}
+
+/*
+ * Battery bands. Colour is never the only carrier: the percentage is always printed
+ * next to the swatch, the card also prints the band as a word, and the marker's
+ * accessible name states the percentage.
+ */
+.band--ok {
+  color: var(--ok);
+}
+
+.band--fair {
+  color: var(--accent);
+}
+
+.band--low {
+  color: var(--warn);
+}
+
+.band--critical {
+  color: var(--alarm);
+  font-weight: 700;
+}
+
+.band__word {
+  color: var(--text-dim);
 }
 
 /* --------------------------------------------------------------- data table -- */
@@ -385,6 +502,23 @@ body {
 
 /* ------------------------------------------------------------ robot marker -- */
 
+/*
+ * MapLibre writes `transform: translate(...)` on the marker container it owns, so the
+ * tween between two telemetry frames belongs there and not on the button. ~110 ms is
+ * just over one frame interval at 10 Hz: long enough to smooth the step, short enough
+ * that the marker is never meaningfully behind the data.
+ *
+ * The map writes that same transform on every frame of a pan, so LotMap adds
+ * `--fixed` for the duration of a gesture; without it every robot visibly lags the map.
+ */
+.robot-anchor {
+  transition: transform 110ms linear;
+}
+
+.robot-anchor--fixed {
+  transition: none;
+}
+
 .robot-marker {
   display: grid;
   place-items: center;
@@ -399,6 +533,24 @@ body {
   line-height: 1;
   cursor: pointer;
   transition: transform 180ms ease-out;
+}
+
+.robot-marker--ok {
+  background: var(--ok);
+  color: #fff;
+}
+
+.robot-marker--fair {
+  background: var(--accent);
+}
+
+.robot-marker--low {
+  background: var(--warn);
+}
+
+.robot-marker--critical {
+  background: var(--alarm);
+  color: #fff;
 }
 
 /* ------------------------------------------------------------------ footer -- */
@@ -427,6 +579,7 @@ body {
   }
 
   .skip-link,
+  .robot-anchor,
   .robot-marker {
     transition: none;
   }

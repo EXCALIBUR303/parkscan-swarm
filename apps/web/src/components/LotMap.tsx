@@ -1,11 +1,12 @@
 import type { ExpressionSpecification, StyleSpecification } from 'maplibre-gl';
-import { useMemo } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import Map, { Layer, Marker, NavigationControl, Source } from 'react-map-gl/maplibre';
 
 import { lotToLngLat, type LotOrigin } from '../lib/enu';
 import { featuresOfKind, withCoverage, type LoadedLot } from '../lib/lot';
 import { BAY_COLOUR, LOT_COLOUR, coverageInterpolateStops } from '../lib/palette';
-import { useCoverageByZone, useRobot, useRobotIds } from '../store';
+import { batteryPercent, describeRobot } from '../lib/robot';
+import { useBatteryBand, useCoverageByZone, useRobot, useRobotIds } from '../store';
 import { MapLegend } from './MapLegend';
 
 /**
@@ -20,7 +21,7 @@ import { MapLegend } from './MapLegend';
  * `['get','coverage']` with the class breaks the legend prints, because coverage is a
  * countable ratio and a kernel-density smear would imply measurement never taken.
  *
- * Render split follows docs/ARCHITECTURE.md §7 — the handful of robots are DOM
+ * Render split follows docs/ARCHITECTURE.md section 7 — the handful of robots are DOM
  * `<Marker>`s (focusable, real buttons, CSS-transitioned) and the ~180 static lot
  * features are GPU GeoJSON layers.
  *
@@ -75,6 +76,20 @@ export function LotMap({ lot }: LotMapProps): React.JSX.Element {
   const coverageByZone = useCoverageByZone();
   const robotIds = useRobotIds();
 
+  /*
+   * Marker position is CSS-transitioned between telemetry frames, and MapLibre writes
+   * the same `transform` while the user pans. Transitioning during a pan would make
+   * every robot visibly lag the map, so the tween is switched off for the duration of
+   * the gesture and back on when it ends. Two renders per gesture, not per frame.
+   */
+  const [mapMoving, setMapMoving] = useState(false);
+  const onMoveStart = useCallback(() => {
+    setMapMoving(true);
+  }, []);
+  const onMoveEnd = useCallback(() => {
+    setMapMoving(false);
+  }, []);
+
   const zones = useMemo(
     () => withCoverage(featuresOfKind(lot.collection, 'zone'), coverageByZone),
     [lot.collection, coverageByZone],
@@ -101,6 +116,8 @@ export function LotMap({ lot }: LotMapProps): React.JSX.Element {
         maxZoom={24}
         minZoom={12}
         attributionControl={false}
+        onMoveStart={onMoveStart}
+        onMoveEnd={onMoveEnd}
         // No basemap means no tile attribution to show; the lot is our own data.
         style={{ width: '100%', height: '100%' }}
       >
@@ -164,7 +181,7 @@ export function LotMap({ lot }: LotMapProps): React.JSX.Element {
         </Source>
 
         {robotIds.map((id) => (
-          <RobotMarker key={id} robotId={id} origin={lot.origin} />
+          <RobotMarker key={id} robotId={id} origin={lot.origin} tweening={!mapMoving} />
         ))}
       </Map>
 
@@ -177,31 +194,48 @@ export function LotMap({ lot }: LotMapProps): React.JSX.Element {
  * One robot marker, subscribed to one robot.
  *
  * Each marker selects only its own slice of the store, so `robot_1` moving does not
- * re-render `robot_2`'s marker or card.
+ * re-render `robot_2`'s marker or card. The battery *band* comes from a second, narrower
+ * selector so the colour class only changes when the band does — not on every percent.
+ *
+ * The button is a real `<button>` with a descriptive `aria-label`, because a rotated
+ * glyph is not a control and a WebGL canvas cannot be reached by a keyboard at all.
+ * Motion is CSS only, so `prefers-reduced-motion` (see styles.css) turns it off without
+ * this component knowing anything about it.
  */
 function RobotMarker({
   robotId,
   origin,
+  tweening,
 }: {
   robotId: string;
   origin: LotOrigin;
+  tweening: boolean;
 }): React.JSX.Element | null {
   const robot = useRobot(robotId);
-  if (robot === undefined) return null;
+  const band = useBatteryBand(robotId);
+  if (robot === undefined || band === undefined) return null;
 
+  // The one place lot metres become longitude/latitude (ADR-0004).
   const [lng, lat] = lotToLngLat(robot.position, origin);
   const headingDeg = (robot.headingRad * 180) / Math.PI;
-  const batteryPct = Math.round(robot.batterySoc * 100);
 
   return (
-    <Marker longitude={lng} latitude={lat} anchor="center">
+    <Marker
+      longitude={lng}
+      latitude={lat}
+      anchor="center"
+      subpixelPositioning
+      className={`robot-anchor${tweening ? '' : ' robot-anchor--fixed'}`}
+    >
       <button
         type="button"
-        className="robot-marker"
+        className={`robot-marker robot-marker--${band}`}
+        // Rotation is negated: screen y grows downward, lot y grows north.
         style={{ transform: `rotate(${String(-headingDeg)}deg)` }}
-        aria-label={`${robotId}: ${robot.state}, battery ${String(batteryPct)} percent, at ${robot.position.x.toFixed(1)} by ${robot.position.y.toFixed(1)} metres`}
+        aria-label={describeRobot(robot)}
+        title={`${robotId} — ${String(batteryPercent(robot.batterySoc))}%`}
       >
-        <span aria-hidden="true">▲</span>
+        <span aria-hidden="true">&#9650;</span>
       </button>
     </Marker>
   );

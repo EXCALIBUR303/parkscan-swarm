@@ -5,39 +5,30 @@
  * and not React Context: at that rate a Context provider re-renders every consumer on
  * every pose update (docs/ARCHITECTURE.md §7).
  *
- * The robots slice is keyed by robot id and updated key-by-key, so moving `robot_1`
- * leaves the `robot_2` and `robot_3` objects reference-identical and their cards do not
- * re-render. `useRobot(id)` relies on exactly that; anything selecting a derived
- * collection must go through `useShallow`.
+ * Two rules keep it fast, and both are tested rather than asserted:
  *
- * Empty until Phase 2 wires MQTT -> FastAPI -> WebSocket.
+ * 1. **Keyed, not rebuilt.** The robots slice is a record keyed by robot id and updated
+ *    key by key, so moving `robot_1` leaves the `robot_2` and `robot_3` objects
+ *    reference-identical and their cards do not re-render. `useRobot(id)` relies on
+ *    exactly that; anything selecting a derived collection goes through `useShallow`.
+ *
+ * 2. **One commit per frame.** `applyBatch` takes a whole `requestAnimationFrame` worth
+ *    of decoded events and performs a single `set()`. The socket never calls
+ *    `applyTelemetry` in a loop — see `src/lib/socket.ts`.
+ *
+ * Derived values are **selectors, not fields**. The battery band, for instance, is
+ * computed from `batterySoc` on read; storing it would create a second definition of
+ * "low" that can drift from the first.
  */
 
 import { create } from 'zustand';
 import { useShallow } from 'zustand/react/shallow';
 
-import type { LotPoint } from './lib/enu';
-import type { CoordinatorView, DataSource, RobotState } from './lib/types';
+import { batteryBand, type BatteryBand, type ConnectionStatus, type RobotView } from './lib/robot';
+import type { LiveEvent } from './lib/socket';
+import type { DataSource } from './lib/types';
 
-/** One robot as the dashboard sees it. Positions are lot metres, never lng/lat. */
-export interface RobotView {
-  readonly id: string;
-  /** Self-reported. */
-  readonly state: RobotState;
-  /** The coordinator's independent judgement — deliberately not merged with `state`. */
-  readonly coordinatorView: CoordinatorView;
-  /** State of charge, 0..1. */
-  readonly batterySoc: number;
-  readonly position: LotPoint;
-  readonly headingRad: number;
-  readonly zoneId: string | null;
-  readonly epoch: number;
-  /** Telemetry stamp, epoch milliseconds. */
-  readonly stampMs: number;
-  readonly dataSource: DataSource;
-}
-
-export type ConnectionStatus = 'idle' | 'connecting' | 'open' | 'reconnecting' | 'closed' | 'error';
+export type { ConnectionStatus, RobotView } from './lib/robot';
 
 export interface ParkscanState {
   /**
@@ -47,7 +38,18 @@ export interface ParkscanState {
   dataSource: DataSource;
   connection: ConnectionStatus;
   lastError: string | null;
+  /** Run the socket says it is streaming, from the server's `run_state` greeting. */
+  runId: string | null;
   robots: Readonly<Record<string, RobotView>>;
+  /**
+   * Frames the server's bounded per-client queue discarded, cumulative.
+   *
+   * Reported by `{"type":"lag","dropped":N}` (docs/API_CONTRACT.md). Surfaced in the UI:
+   * a lossy stream that looks lossless is worse than one that admits it.
+   */
+  droppedFrames: number;
+  /** Frames this client could not decode, cumulative. Schema drift shows up here. */
+  malformedFrames: number;
   /** Zone id -> coverage fraction 0..1, from `GET /api/v1/coverage`. */
   coverageByZone: Readonly<Record<string, number>>;
 
@@ -55,6 +57,8 @@ export interface ParkscanState {
   setConnection: (connection: ConnectionStatus, error?: string | null) => void;
   /** Upsert one robot. Other robots keep their object identity. */
   applyTelemetry: (robot: RobotView) => void;
+  /** Apply one animation frame's worth of socket events in a single commit. */
+  applyBatch: (batch: readonly LiveEvent[]) => void;
   applyCoverage: (coverageByZone: Readonly<Record<string, number>>) => void;
   removeRobot: (id: string) => void;
   reset: () => void;
@@ -64,7 +68,10 @@ const INITIAL = {
   dataSource: 'simulated' as DataSource,
   connection: 'idle' as ConnectionStatus,
   lastError: null,
+  runId: null,
   robots: {} as Readonly<Record<string, RobotView>>,
+  droppedFrames: 0,
+  malformedFrames: 0,
   coverageByZone: {} as Readonly<Record<string, number>>,
 };
 
@@ -84,6 +91,57 @@ export const useParkscanStore = create<ParkscanState>()((set) => ({
       robots: { ...state.robots, [robot.id]: robot },
       dataSource: robot.dataSource,
     }));
+  },
+
+  applyBatch: (batch) => {
+    if (batch.length === 0) return;
+    set((state) => {
+      let robots: Record<string, RobotView> | null = null;
+      let dataSource = state.dataSource;
+      let runId = state.runId;
+      let dropped = state.droppedFrames;
+      let malformed = state.malformedFrames;
+      let lastError = state.lastError;
+      let touched = false;
+
+      for (const event of batch) {
+        switch (event.kind) {
+          case 'telemetry':
+            robots ??= { ...state.robots };
+            robots[event.robot.id] = event.robot;
+            dataSource = event.robot.dataSource;
+            touched = true;
+            break;
+          case 'run_state':
+            runId = event.runId;
+            dataSource = event.dataSource;
+            touched = true;
+            break;
+          case 'lag':
+            dropped += event.dropped;
+            touched = true;
+            break;
+          case 'malformed':
+            malformed += 1;
+            touched = true;
+            break;
+          case 'server_error':
+            lastError = event.detail;
+            touched = true;
+            break;
+        }
+      }
+
+      if (!touched) return state;
+      return {
+        robots: robots ?? state.robots,
+        dataSource,
+        runId,
+        droppedFrames: dropped,
+        malformedFrames: malformed,
+        lastError,
+      };
+    });
   },
 
   applyCoverage: (coverageByZone) => {
@@ -114,6 +172,17 @@ export function useConnection(): { status: ConnectionStatus; error: string | nul
   return useParkscanStore(useShallow((s) => ({ status: s.connection, error: s.lastError })));
 }
 
+/** Cumulative stream losses. Shallow-compared so it does not re-render on every pose. */
+export function useStreamLoss(): { dropped: number; malformed: number } {
+  return useParkscanStore(
+    useShallow((s) => ({ dropped: s.droppedFrames, malformed: s.malformedFrames })),
+  );
+}
+
+export function useRunId(): string | null {
+  return useParkscanStore((s) => s.runId);
+}
+
 /** Stable, sorted robot ids. `useShallow` keeps the array identity from thrashing. */
 export function useRobotIds(): string[] {
   return useParkscanStore(useShallow((s) => Object.keys(s.robots).sort()));
@@ -125,6 +194,20 @@ export function useRobotIds(): string[] {
  */
 export function useRobot(id: string): RobotView | undefined {
   return useParkscanStore((s) => s.robots[id]);
+}
+
+/**
+ * One robot's battery band.
+ *
+ * Derived on read, deliberately: the band is a display grouping of `batterySoc`, and a
+ * component subscribed to it re-renders only when the *band* changes, not on every
+ * percent. Storing it would duplicate the definition of "low".
+ */
+export function useBatteryBand(id: string): BatteryBand | undefined {
+  return useParkscanStore((s) => {
+    const robot = s.robots[id];
+    return robot === undefined ? undefined : batteryBand(robot.batterySoc);
+  });
 }
 
 export function useCoverageByZone(): Readonly<Record<string, number>> {

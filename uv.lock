@@ -4,8 +4,11 @@ requires-python = "==3.12.*"
 
 [manifest]
 members = [
+    "parkscan-agent",
     "parkscan-api",
     "parkscan-core",
+    "parkscan-runner",
+    "parkscan-sim",
     "parkscan-swarm",
 ]
 
@@ -429,6 +432,23 @@ wheels = [
 ]
 
 [[package]]
+name = "parkscan-agent"
+version = "0.1.0"
+source = { editable = "packages/parkscan_agent" }
+dependencies = [
+    { name = "aiomqtt" },
+    { name = "numpy" },
+    { name = "parkscan-core" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "aiomqtt", specifier = "==2.5.1" },
+    { name = "numpy", specifier = "==2.5.2" },
+    { name = "parkscan-core", editable = "packages/parkscan_core" },
+]
+
+[[package]]
 name = "parkscan-api"
 version = "0.1.0"
 source = { editable = "apps/api" }
@@ -476,6 +496,42 @@ requires-dist = [
     { name = "numpy", specifier = "==2.5.2" },
     { name = "pydantic", specifier = "==2.13.5" },
     { name = "pyyaml", specifier = "==6.0.3" },
+]
+
+[[package]]
+name = "parkscan-runner"
+version = "0.1.0"
+source = { editable = "apps/runner" }
+dependencies = [
+    { name = "aiomqtt" },
+    { name = "parkscan-agent" },
+    { name = "parkscan-core" },
+    { name = "parkscan-sim" },
+    { name = "structlog" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "aiomqtt", specifier = "==2.5.1" },
+    { name = "parkscan-agent", editable = "packages/parkscan_agent" },
+    { name = "parkscan-core", editable = "packages/parkscan_core" },
+    { name = "parkscan-sim", editable = "packages/parkscan_sim" },
+    { name = "structlog", specifier = "==26.1.0" },
+]
+
+[[package]]
+name = "parkscan-sim"
+version = "0.1.0"
+source = { editable = "packages/parkscan_sim" }
+dependencies = [
+    { name = "numpy" },
+    { name = "parkscan-core" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "numpy", specifier = "==2.5.2" },
+    { name = "parkscan-core", editable = "packages/parkscan_core" },
 ]
 
 [[package]]

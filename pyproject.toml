@@ -19,10 +19,13 @@ dev = [
 ]
 
 [tool.uv.workspace]
-members = ["packages/*", "apps/api"]
+members = ["packages/*", "apps/api", "apps/runner"]
 
 [tool.uv.sources]
 parkscan-core = { workspace = true }
+parkscan-sim = { workspace = true }
+parkscan-agent = { workspace = true }
+parkscan-runner = { workspace = true }
 
 # --------------------------------------------------------------------------
 [tool.ruff]
@@ -53,7 +56,7 @@ strict = true
 # them would have been.
 exclude = ["^apps/api/migrations/"]
 warn_unreachable = true
-mypy_path = "packages/parkscan_core/src:apps/api/src"
+mypy_path = "packages/parkscan_core/src:packages/parkscan_sim/src:packages/parkscan_agent/src:apps/api/src:apps/runner/src"
 explicit_package_bases = true
 
 [[tool.mypy.overrides]]
@@ -67,8 +70,13 @@ ignore_missing_imports = true
 # that defines its own event_loop fixture is stale — use asyncio_mode=auto and
 # `loop_scope=` on fixtures instead.
 asyncio_mode = "auto"
-testpaths = ["packages", "apps/api"]
-addopts = "-q --strict-markers"
+testpaths = ["packages", "apps/api", "apps/runner"]
+# --import-mode=importlib: test modules in different packages may share a basename
+# (parkscan_core/tests/test_world.py and parkscan_sim/tests/test_world.py both exist
+# and both are correctly named for what they test). The legacy "prepend" import mode
+# derives a module name from the basename alone and collides; importlib mode does not,
+# and needs no __init__.py littered through the test trees.
+addopts = "-q --strict-markers --import-mode=importlib"
 markers = [
   "docker: requires a running Docker daemon (skipped by default on this machine)",
   "db: requires a reachable PostgreSQL + PostGIS",

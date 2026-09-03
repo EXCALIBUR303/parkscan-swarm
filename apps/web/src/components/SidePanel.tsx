@@ -1,6 +1,14 @@
 import type { LoadedLot } from '../lib/lot';
+import { CONNECTION_LABEL, batteryPercent, capitalise, humaniseId } from '../lib/robot';
 import type { LotStatus } from '../lib/useLot';
-import { useConnection, useRobotIds } from '../store';
+import {
+  useBatteryBand,
+  useConnection,
+  useRobot,
+  useRobotIds,
+  useRunId,
+  useStreamLoss,
+} from '../store';
 
 /**
  * Side panel.
@@ -22,6 +30,8 @@ export function SidePanel({ status, lot, error, onRetry }: SidePanelProps): Reac
   return (
     <aside className="side" aria-labelledby="side-heading">
       <h2 id="side-heading">Run</h2>
+
+      <ConnectionIndicator />
 
       {status === 'loading' && (
         <p className="state state--loading" aria-busy="true" data-testid="lot-loading">
@@ -49,6 +59,43 @@ export function SidePanel({ status, lot, error, onRetry }: SidePanelProps): Reac
 
       <FleetSection />
     </aside>
+  );
+}
+
+/**
+ * Liveness of `/ws/live`, always visible.
+ *
+ * Not folded into the fleet's empty state: "no robots" and "no connection" are different
+ * facts with different fixes, and a dashboard that shows one when it means the other
+ * wastes the operator's time. The dropped-frame counter is here too — the server's
+ * per-client queue is bounded at 100 with drop-oldest and reports the loss
+ * (docs/API_CONTRACT.md), so hiding that number would turn a visibly lossy stream into
+ * an invisibly wrong one.
+ */
+function ConnectionIndicator(): React.JSX.Element {
+  const { status, error } = useConnection();
+  const { dropped, malformed } = useStreamLoss();
+  const runId = useRunId();
+
+  return (
+    <div className={`conn conn--${status}`} data-testid="connection-status" data-status={status}>
+      <span className="conn__dot" aria-hidden="true" />
+      <span className="conn__label">
+        Telemetry stream: <strong>{CONNECTION_LABEL[status]}</strong>
+      </span>
+      {runId !== null && <span className="conn__run">run {runId}</span>}
+      {error !== null && <span className="conn__detail">{error}</span>}
+      {dropped > 0 && (
+        <span className="conn__detail" data-testid="dropped-frames">
+          {dropped} frame{dropped === 1 ? '' : 's'} dropped by the server queue
+        </span>
+      )}
+      {malformed > 0 && (
+        <span className="conn__detail" data-testid="malformed-frames">
+          {malformed} frame{malformed === 1 ? '' : 's'} this client could not decode
+        </span>
+      )}
+    </div>
   );
 }
 
@@ -82,7 +129,8 @@ function LotSummary({ lot }: { lot: LoadedLot }): React.JSX.Element {
 /**
  * Fleet slice.
  *
- * Empty in Phase 1 and it says exactly why, rather than showing a plausible-looking zero.
+ * Subscribes only to the **id list**, and each card subscribes to its own robot, so a
+ * pose arriving for `robot_1` re-renders one card rather than the panel.
  */
 function FleetSection(): React.JSX.Element {
   const robotIds = useRobotIds();
@@ -92,35 +140,75 @@ function FleetSection(): React.JSX.Element {
     <section className="side__section" aria-labelledby="fleet-heading">
       <h3 id="fleet-heading">Fleet</h3>
 
-      {status === 'error' ? (
+      {robotIds.length > 0 ? (
+        <ul className="fleet" data-testid="fleet-list">
+          {robotIds.map((id) => (
+            <RobotCard key={id} robotId={id} />
+          ))}
+        </ul>
+      ) : status === 'error' ? (
         <div className="state state--error" role="alert" data-testid="fleet-error">
           <p>
             <strong>Telemetry connection failed.</strong>
           </p>
           <p className="state__detail">{error ?? 'Unknown error.'}</p>
+          <p className="state__detail">
+            The dashboard proxies <code>/ws</code> to the API on <code>127.0.0.1:8000</code>. If the
+            API is not running, start it with <code>make api</code>.
+          </p>
         </div>
-      ) : status === 'connecting' || status === 'reconnecting' ? (
+      ) : status === 'connecting' || status === 'reconnecting' || status === 'idle' ? (
         <p className="state state--loading" aria-busy="true" data-testid="fleet-loading">
           Connecting to the telemetry stream…
         </p>
-      ) : robotIds.length === 0 ? (
+      ) : (
         <div className="state state--empty" data-testid="fleet-empty">
           <p>No robot telemetry yet.</p>
           <p className="state__detail">
-            The backend&rsquo;s MQTT &rarr; API &rarr; WebSocket path works, but this shell does not
-            subscribe to it yet, and there are no robots publishing. Simulated robots arrive in
-            Phase&nbsp;2; for now the map renders lot geometry only.
+            The stream is {CONNECTION_LABEL[status]} and nothing is publishing to{' '}
+            <code>parkscan/v1/&#123;run&#125;/robot/+/telemetry</code>. Robots appear here the
+            moment a sample arrives; this panel stays empty rather than showing a plausible-looking
+            zero.
           </p>
         </div>
-      ) : (
-        <ul className="fleet" data-testid="fleet-list">
-          {robotIds.map((id) => (
-            <li key={id} className="fleet__id">
-              {id}
-            </li>
-          ))}
-        </ul>
       )}
     </section>
+  );
+}
+
+/**
+ * One robot card.
+ *
+ * The heading is the same sentence the map marker uses for its accessible name, so the
+ * two views cannot describe the same robot differently.
+ */
+function RobotCard({ robotId }: { robotId: string }): React.JSX.Element | null {
+  const robot = useRobot(robotId);
+  const band = useBatteryBand(robotId);
+  if (robot === undefined || band === undefined) return null;
+
+  return (
+    <li className="fleet__card" data-testid={`robot-card-${robotId}`}>
+      <h4 className="fleet__id">{capitalise(humaniseId(robot.id))}</h4>
+      <dl className="kv kv--tight">
+        <dt>Reported state</dt>
+        <dd>{robot.state.replace(/_/g, ' ')}</dd>
+        <dt>Coordinator view</dt>
+        <dd>{robot.coordinatorView ?? 'not reported'}</dd>
+        <dt>Battery</dt>
+        <dd>
+          <span className={`band band--${band}`}>{batteryPercent(robot.batterySoc)}%</span>{' '}
+          <span className="band__word">({band})</span>
+        </dd>
+        <dt>Position</dt>
+        <dd>
+          {robot.position.x.toFixed(1)}, {robot.position.y.toFixed(1)} m
+        </dd>
+        <dt>Zone</dt>
+        <dd>{robot.zoneId ?? '—'}</dd>
+        <dt>Epoch</dt>
+        <dd>{robot.epoch}</dd>
+      </dl>
+    </li>
   );
 }

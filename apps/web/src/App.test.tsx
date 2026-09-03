@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 // MapLibre GL 6 needs WebGL2 and jsdom has none, so the map primitives are replaced.
@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 vi.mock('react-map-gl/maplibre', async () => await import('./test/reactMapGlMock'));
 
 import { App } from './App';
+import { useParkscanStore } from './store';
 import LOT_TEXT from '../public/lot.geojson?raw';
 
 function stubLotFetch(mode: 'ok' | 'fail' | 'pending'): void {
@@ -89,15 +90,24 @@ describe('App shell', () => {
     }
   });
 
-  it('says why the fleet is empty instead of showing a bare zero', async () => {
+  it('distinguishes "not connected" from "connected but nobody is publishing"', async () => {
+    // These are different facts with different fixes — "start the API" vs "start the
+    // runner" — and a panel that shows one when it means the other wastes the reader's
+    // time. Both branches are asserted because collapsing them is the easy regression.
     stubLotFetch('ok');
     render(<App />);
+
+    // Before the socket opens, the panel says it is still connecting.
+    const connecting = await screen.findByTestId('fleet-loading');
+    expect(connecting).toHaveTextContent(/connecting/i);
+
+    // Once open with no robots, it says so, and says where the robots would come from.
+    act(() => {
+      useParkscanStore.getState().setConnection('open');
+    });
     const empty = await screen.findByTestId('fleet-empty');
     expect(empty).toHaveTextContent('No robot telemetry yet.');
-    // The detail must explain WHY it is empty, not just that it is. Asserting on
-    // 'Phase' keeps the test honest about the cause without pinning exact prose.
-    expect(empty).toHaveTextContent(/Phase\s*2/);
-    expect(empty).toHaveTextContent(/no robots publishing/i);
+    expect(empty).toHaveTextContent(/telemetry/i);
   });
 
   it('has landmarks and a skip link that points at a real target', async () => {

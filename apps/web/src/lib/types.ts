@@ -39,6 +39,31 @@ export type BayState = 'vacant' | 'occupied' | 'unknown';
 const DATA_SOURCES: readonly DataSource[] = ['simulated', 'replay', 'live'];
 const BAY_STATES: readonly BayState[] = ['vacant', 'occupied', 'unknown'];
 
+/**
+ * Every `robot_state` value, in the order docs/ARCHITECTURE.md §3 lists them.
+ *
+ * Exhaustive on purpose: an unknown state arriving over the WebSocket must be rejected
+ * at the boundary rather than widened into the union to make a render succeed.
+ */
+export const ROBOT_STATES: readonly RobotState[] = [
+  'idle',
+  'assigned',
+  'transit',
+  'inspecting',
+  'waiting_on_lease',
+  'returning',
+  'charging',
+  'failed',
+  'offline',
+];
+
+export const COORDINATOR_VIEWS: readonly CoordinatorView[] = [
+  'online',
+  'suspect',
+  'offline',
+  'stuck',
+];
+
 /** Narrow an untrusted value (API payload, GeoJSON property) to a `DataSource`. */
 export function isDataSource(value: unknown): value is DataSource {
   return typeof value === 'string' && (DATA_SOURCES as readonly string[]).includes(value);
@@ -47,4 +72,14 @@ export function isDataSource(value: unknown): value is DataSource {
 /** Narrow an untrusted value to a `BayState`. */
 export function isBayState(value: unknown): value is BayState {
   return typeof value === 'string' && (BAY_STATES as readonly string[]).includes(value);
+}
+
+/** Narrow an untrusted WebSocket payload field to a `RobotState`. */
+export function isRobotState(value: unknown): value is RobotState {
+  return typeof value === 'string' && (ROBOT_STATES as readonly string[]).includes(value);
+}
+
+/** Narrow an untrusted WebSocket payload field to a `CoordinatorView`. */
+export function isCoordinatorView(value: unknown): value is CoordinatorView {
+  return typeof value === 'string' && (COORDINATOR_VIEWS as readonly string[]).includes(value);
 }

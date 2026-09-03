@@ -41,17 +41,17 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done & verified · `[!]` blocke
 - [~] GitHub Actions CI written (lint + test + AGPL/PML guard) — **never executed**, no remote
 - [x] **Verify:** `make bootstrap && make test` green from a clean clone
 
-## Phase 2 — Single-robot vertical slice (Sonnet)
-- [ ] `parkscan_core.types` + `WorldBackend` Protocol
-- [ ] `sim-lite`: seeded kinematic sim, fixed dt, lane graph, planar ranges, battery model
-- [ ] Lot config + zone decomposition; test: zones tile the lot, zero gaps/overlap (C8)
-- [ ] Robot task state machine + **table-driven test over all (state, event) pairs** (C7)
-- [ ] Waypoint navigation on the lane graph (Manhattan, not Euclidean) + reactive avoidance
-- [ ] Feasibility-based return-to-charge, evaluated continuously during a sweep
-- [ ] Autonomous bay docking (A2)
-- [ ] Telemetry → MQTT → FastAPI → Postgres → WebSocket → moving marker (A3)
-- [ ] `make demo`
-- [ ] **Verify:** A1, A2, A3
+## Phase 2 — Single-robot vertical slice (Sonnet) — **COMPLETE** (2026-09-03)
+- [x] `parkscan_core.types` + `WorldBackend` Protocol
+- [x] `sim-lite`: seeded kinematic sim, fixed dt, lane graph, planar ranges, battery model
+- [x] Lot config + zone decomposition; test: zones tile the lot, zero gaps/overlap (C8)
+- [x] Robot task state machine + **table-driven test over all (state, event) pairs** (C7)
+- [x] Waypoint navigation on the lane graph (Manhattan, not Euclidean) + reactive avoidance
+- [x] Feasibility-based return-to-charge, evaluated continuously during a sweep
+- [x] Autonomous bay docking (A2)
+- [x] Telemetry → MQTT → FastAPI → Postgres → WebSocket → moving marker (A3)
+- [x] `make demo`
+- [x] **Verify:** A1, A2, A3
 
 ## Phase 3 — Perception vertical slice (Sonnet)
 - [ ] `Detector` Protocol + `DetSource` enum + `Detection`/`BBox` (`bottom_centre` property)

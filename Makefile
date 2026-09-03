@@ -107,9 +107,17 @@ smoke: ## End-to-end check: DB reachable, migrations applied, MQTT round-trips
 	$(PY) -m parkscan_api.cli smoke
 
 # -------------------------------------------------------- later phases ------
-.PHONY: demo bench eval
-demo:  ## (Phase 2) Run the single-robot demo
-	@echo "not implemented until Phase 2 — see TASKS.md"; exit 1
+.PHONY: demo demo-dock demo-watch bench eval
+demo: ## Single robot sweeps a zone, as fast as the CPU allows
+	$(PY) -m parkscan_runner.run --seed 42 --robots 1 --zones zone_01
+
+demo-watch: ## Same run throttled to real time, so the dashboard is watchable
+	@echo "Open http://127.0.0.1:5173 (make web) and http://127.0.0.1:8000/docs (make api) first."
+	$(PY) -m parkscan_runner.run --seed 42 --robots 1 --zones zone_03 --realtime
+
+demo-dock: ## Start near-flat: the robot must decide to return and dock unaided
+	$(PY) -m parkscan_runner.run --seed 42 --robots 1 --zones zone_09 --start-soc 0.08
+
 bench: ## (Phase 4) 30 seeds x 3 strategies -> results.csv
 	@echo "not implemented until Phase 4 — see TASKS.md"; exit 1
 eval:  ## (Phase 3) Geolocation + detector-contract evaluation
