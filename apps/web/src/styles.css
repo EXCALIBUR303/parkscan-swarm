@@ -1,0 +1,433 @@
+/*
+ * Dashboard styles.
+ *
+ * Dark by default because the map has no basemap and a dark ground makes the lot's own
+ * geometry the only thing on screen. Focus is always visible, and every animation is
+ * gated behind `prefers-reduced-motion`.
+ */
+
+:root {
+  --bg: #0b0e12;
+  --bg-raised: #151a21;
+  --bg-sunken: #090b0f;
+  --line: #2a323d;
+  --text: #e7ecf2;
+  --text-dim: #a3aebc;
+  --accent: #56b4e9;
+  --warn: #e69f00;
+  --focus: #f0e442;
+
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    Helvetica,
+    Arial,
+    sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* Focus is never removed, only restyled. */
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.skip-link {
+  position: absolute;
+  left: var(--space-2);
+  top: -3rem;
+  z-index: 20;
+  padding: var(--space-2) var(--space-3);
+  background: var(--focus);
+  color: #000;
+  font-weight: 700;
+  text-decoration: none;
+  transition: top 120ms ease;
+}
+
+.skip-link:focus {
+  top: var(--space-2);
+}
+
+.app {
+  display: grid;
+  grid-template-rows: auto 1fr auto auto;
+  min-height: 100%;
+}
+
+/* ------------------------------------------------------------------- header -- */
+
+.header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-4);
+  background: var(--bg-raised);
+  border-bottom: 1px solid var(--line);
+}
+
+.header__title {
+  margin: 0;
+  font-size: 1.15rem;
+  letter-spacing: 0.02em;
+}
+
+.header__subtitle {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 0.8rem;
+}
+
+/* -------------------------------------------------------------------- badge -- */
+
+/*
+ * Persistent and non-dismissable by construction: no close control exists, and nothing
+ * in the app can unmount it (ACCEPTANCE H1/H2).
+ */
+.badge {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 2px solid var(--warn);
+  border-radius: 4px;
+  background: #2a1f05;
+  max-width: 46rem;
+}
+
+.badge--live {
+  border-color: var(--accent);
+  background: #06202c;
+}
+
+.badge__mark {
+  color: var(--warn);
+  font-size: 0.7rem;
+}
+
+.badge--live .badge__mark {
+  color: var(--accent);
+}
+
+.badge__text {
+  letter-spacing: 0.06em;
+  font-size: 0.8rem;
+}
+
+.badge__detail {
+  color: var(--text-dim);
+  font-size: 0.75rem;
+}
+
+/* --------------------------------------------------------------------- main -- */
+
+.main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 20rem;
+  min-height: 60vh;
+}
+
+@media (max-width: 60rem) {
+  .main {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.mapregion {
+  position: relative;
+  min-height: 24rem;
+  background: var(--bg-sunken);
+}
+
+.mapregion__state {
+  padding: var(--space-5);
+}
+
+.lotmap {
+  position: absolute;
+  inset: 0;
+}
+
+/* ------------------------------------------------------------------- legend -- */
+
+.legend {
+  position: absolute;
+  left: var(--space-3);
+  bottom: var(--space-3);
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  max-width: calc(100% - 2 * var(--space-3));
+  padding: var(--space-3);
+  background: rgb(11 14 18 / 88%);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+.legend__title {
+  margin: 0 0 var(--space-1);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+}
+
+.legend__note {
+  margin: 0 0 var(--space-1);
+  font-size: 0.7rem;
+  color: var(--text-dim);
+}
+
+.legend__items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.legend__items--ramp {
+  flex-direction: row;
+  gap: var(--space-2);
+}
+
+.legend__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: 0.72rem;
+}
+
+.legend__swatch {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+
+.legend__swatch--box {
+  display: inline-block;
+  border: 1px solid;
+  border-radius: 2px;
+}
+
+/* -------------------------------------------------------------- side panel -- */
+
+.side {
+  padding: var(--space-4);
+  border-left: 1px solid var(--line);
+  background: var(--bg-raised);
+}
+
+.side h2 {
+  margin-top: 0;
+  font-size: 0.95rem;
+}
+
+.side__section {
+  margin-top: var(--space-5);
+  border-top: 1px solid var(--line);
+  padding-top: var(--space-3);
+}
+
+.side h3 {
+  margin: 0 0 var(--space-2);
+  font-size: 0.85rem;
+}
+
+.kv {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px var(--space-3);
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+.kv dt {
+  color: var(--text-dim);
+}
+
+.kv dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.note,
+.state__detail {
+  color: var(--text-dim);
+  font-size: 0.75rem;
+}
+
+.state {
+  margin: var(--space-2) 0;
+  padding: var(--space-3);
+  border-radius: 4px;
+  background: var(--bg-sunken);
+  border-left: 3px solid var(--line);
+}
+
+.state--error {
+  border-left-color: var(--warn);
+}
+
+.state--loading {
+  border-left-color: var(--accent);
+}
+
+.state p {
+  margin: 0 0 var(--space-1);
+}
+
+.button {
+  margin-top: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--accent);
+  color: #000;
+  border: 0;
+  border-radius: 3px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.fleet {
+  margin: 0;
+  padding-left: var(--space-4);
+}
+
+/* --------------------------------------------------------------- data table -- */
+
+.panel {
+  padding: var(--space-4);
+  border-top: 1px solid var(--line);
+}
+
+.panel h2 {
+  margin-top: 0;
+  font-size: 0.95rem;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.table__caption {
+  caption-side: top;
+  text-align: left;
+  color: var(--text-dim);
+  font-size: 0.75rem;
+  padding-bottom: var(--space-2);
+}
+
+.table th,
+.table td {
+  border-bottom: 1px solid var(--line);
+  padding: var(--space-2);
+  text-align: left;
+}
+
+.table thead th {
+  color: var(--text-dim);
+  font-weight: 600;
+}
+
+.table__empty {
+  color: var(--text-dim);
+  font-style: italic;
+}
+
+/* ------------------------------------------------------------ robot marker -- */
+
+.robot-marker {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 2px solid #000;
+  border-radius: 50%;
+  background: var(--focus);
+  color: #000;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  transition: transform 180ms ease-out;
+}
+
+/* ------------------------------------------------------------------ footer -- */
+
+.footer {
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--line);
+  color: var(--text-dim);
+  font-size: 0.75rem;
+}
+
+.footer p {
+  margin: 0;
+}
+
+/* -------------------------------------------------------- reduced motion -- */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .skip-link,
+  .robot-marker {
+    transition: none;
+  }
+}

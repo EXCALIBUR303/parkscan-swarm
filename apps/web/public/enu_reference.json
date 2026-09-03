@@ -1,0 +1,58 @@
+{
+  "_comment": "Shared cross-language reference for the lot-metres <-> WGS84 projection. packages/parkscan_core/tests/test_geo.py and apps/web/src/lib/enu.test.ts BOTH assert against this file. It exists because the Python and TypeScript implementations are independent, and a silent divergence between them would put robots and detections in different places on the map with nothing failing. Regenerate deliberately, never casually.",
+  "origin": {
+    "lat": 0.0,
+    "lon": 0.0
+  },
+  "tolerance_deg": 1e-12,
+  "points": [
+    {
+      "x_m": 0.0,
+      "y_m": 0.0,
+      "lon": 0.0,
+      "lat": 0.0
+    },
+    {
+      "x_m": 1.0,
+      "y_m": 1.0,
+      "lon": 8.983152841195214e-06,
+      "lat": 9.043694770503822e-06
+    },
+    {
+      "x_m": 10.0,
+      "y_m": 10.0,
+      "lon": 8.983152841195215e-05,
+      "lat": 9.043694770503822e-05
+    },
+    {
+      "x_m": 37.5,
+      "y_m": 25.0,
+      "lon": 0.0003368682315448205,
+      "lat": 0.00022609236926259555
+    },
+    {
+      "x_m": 75.0,
+      "y_m": 50.0,
+      "lon": 0.000673736463089641,
+      "lat": 0.0004521847385251911
+    },
+    {
+      "x_m": 100.0,
+      "y_m": 33.3,
+      "lon": 0.0008983152841195215,
+      "lat": 0.00030115503585777725
+    },
+    {
+      "x_m": 149.9,
+      "y_m": 99.9,
+      "lon": 0.001346574610895163,
+      "lat": 0.0009034651075733319
+    },
+    {
+      "x_m": 150.0,
+      "y_m": 100.0,
+      "lon": 0.001347472926179282,
+      "lat": 0.0009043694770503822
+    }
+  ]
+}

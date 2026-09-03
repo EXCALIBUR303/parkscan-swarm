@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+dist/
+build/
+.coverage
+htmlcov/
+
+# Node
+node_modules/
+apps/web/dist/
+*.tsbuildinfo
+
+# Env / secrets
+.env
+.env.local
+
+# Data & artifacts (never commit datasets or evidence images)
+data/
+datasets/
+evidence/
+*.pt
+*.onnx
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/

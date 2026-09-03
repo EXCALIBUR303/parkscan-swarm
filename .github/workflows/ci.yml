@@ -1,0 +1,56 @@
+name: ci
+on:
+  push: { branches: [main] }
+  pull_request:
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    services:
+      # CI runners are x86, so the official PostGIS image is fine here. The arm64
+      # image selection in docker-compose.yml is a local-machine concern (ADR-0003).
+      postgis:
+        image: postgis/postgis:17-3.5
+        env:
+          POSTGRES_USER: parkscan
+          POSTGRES_PASSWORD: parkscan
+          POSTGRES_DB: parkscan_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U parkscan" --health-interval 5s
+          --health-timeout 3s --health-retries 20
+      mqtt:
+        image: eclipse-mosquitto:2.1.2-alpine
+        ports: ["1883:1883"]
+    env:
+      DATABASE_URL: postgresql+asyncpg://parkscan:parkscan@127.0.0.1:5432/parkscan_test
+      MQTT_HOST: 127.0.0.1
+      MQTT_PORT: "1883"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+        with: { enable-cache: true }
+      - run: uv sync --python 3.12 --all-packages
+      - name: Licence guard (ADR-0006 — no AGPL/PML model deps)
+        run: |
+          if uv pip list | grep -Eiq '^(ultralytics|rfdetr[-_]plus)\b'; then
+            echo "FAIL: AGPL-3.0 / PML-1.0 dependency present"; exit 1
+          fi
+          echo "licence guard: clean"
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy packages apps/api
+      - run: uv run pytest
+
+  web:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: apps/web } }
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
+        with: { node-version: "22", cache: npm, cache-dependency-path: apps/web/package-lock.json }
+      - run: npm ci --no-audit --no-fund
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run test -- --run
+      - run: npm run build

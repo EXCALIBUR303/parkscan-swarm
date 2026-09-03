@@ -1,0 +1,48 @@
+# Local stack for ParkScan Swarm.
+#
+# `make dev` does NOT require this file — see the native fallback in the Makefile
+# and README. Everything here has a brew-installable equivalent, deliberately, so
+# the project runs with the Docker daemon stopped.
+name: parkscan-swarm
+
+services:
+  db:
+    # NOT postgis/postgis. That image publishes no linux/arm64 manifest (verified
+    # across 30 tags via the Docker Hub API; upstream README says "Supported
+    # architecture: amd64"), so on Apple Silicon it would run under emulation.
+    # imresamu/postgis is the multi-arch build maintained by the #2 committer on
+    # the official postgis/docker-postgis repo. See docs/adr/0003.
+    image: imresamu/postgis:17-3.5-alpine
+    platform: linux/arm64
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-parkscan}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-parkscan}
+      POSTGRES_DB: ${POSTGRES_DB:-parkscan}
+    # Host port 5433, not 5432: a native Homebrew PostgreSQL 17 is already bound
+    # to 127.0.0.1:5432 on this machine and wins for localhost connections, so
+    # anything run from the host would silently hit the wrong database.
+    ports: ["5433:5432"]
+    volumes:
+      - "pgdata:/var/lib/postgresql/data"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-parkscan} -d ${POSTGRES_DB:-parkscan}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  mqtt:
+    image: eclipse-mosquitto:2.1.2-alpine
+    ports:
+      - "1883:1883"   # mqtt
+      - "9001:9001"   # websockets (unused by the dashboard by design — the
+                      # browser talks to FastAPI, never to the broker directly)
+    volumes:
+      - "./infra/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro"
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_sub -h 127.0.0.1 -p 1883 -t '$$SYS/#' -C 1 -W 3 >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:

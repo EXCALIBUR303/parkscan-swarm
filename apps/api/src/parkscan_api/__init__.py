@@ -1,0 +1,1 @@
+"""ParkScan Swarm — FastAPI backend."""

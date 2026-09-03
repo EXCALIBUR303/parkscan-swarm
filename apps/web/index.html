@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark light" />
+    <!--
+      The title is overwritten at runtime from `data_source` (ACCEPTANCE H2). This static
+      value is the honest default for a page that has not loaded any data yet.
+    -->
+    <title>SIMULATED — ParkScan Swarm</title>
+    <meta
+      name="description"
+      content="ParkScan Swarm dashboard. Simulated multi-robot parking-lot inspection; no physical robots."
+    />
+  </head>
+  <body>
+    <div id="root"></div>
+    <noscript>
+      This dashboard renders a WebGL2 map and requires JavaScript. The underlying data is available
+      from the REST API at /api/v1.
+    </noscript>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

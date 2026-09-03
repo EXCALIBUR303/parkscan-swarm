@@ -1,0 +1,76 @@
+[project]
+name = "parkscan-swarm"
+version = "0.1.0"
+description = "Multi-robot autonomous parking-lot inspection and pothole-mapping (simulation-first)"
+requires-python = ">=3.12,<3.13"
+license = { text = "MIT" }
+
+# The workspace root is not itself installable; it exists to pin the toolchain
+# and to hold the dev dependency set shared by every member.
+[dependency-groups]
+dev = [
+  "pytest==9.1.1",
+  "pytest-asyncio==1.4.0",
+  "pytest-cov==7.1.0",
+  "httpx==0.28.1",
+  "asgi-lifespan==2.1.0",
+  "ruff==0.16.5",
+  "mypy==2.3.1",
+]
+
+[tool.uv.workspace]
+members = ["packages/*", "apps/api"]
+
+[tool.uv.sources]
+parkscan-core = { workspace = true }
+
+# --------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["packages/parkscan_core/src", "apps/api/src"]
+# docs/ holds design prose. Its fenced code blocks are illustrative sketches of
+# interfaces, not compiled code, and `ruff format` rewrites them — which would make
+# the formatter the owner of the architecture documents. It is not.
+extend-exclude = ["docs"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "ANN", "PTH"]
+ignore = ["ANN401"]
+
+[tool.ruff.lint.per-file-ignores]
+"**/tests/*" = ["ANN"]
+
+# --------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.12"
+strict = true
+# Alembic migrations are excluded, deliberately. `op` is a dynamically-generated
+# proxy and GeoAlchemy2 monkeypatches `create_geospatial_table` / `drop_geospatial_index`
+# onto it at import time, so --strict reports ~29 attr-defined errors on correct,
+# working DDL. The migrations are verified by RUNNING them (upgrade + downgrade +
+# re-upgrade against a real PostGIS) in tests, which is stronger than type-checking
+# them would have been.
+exclude = ["^apps/api/migrations/"]
+warn_unreachable = true
+mypy_path = "packages/parkscan_core/src:apps/api/src"
+explicit_package_bases = true
+
+[[tool.mypy.overrides]]
+# These ship no type stubs / py.typed marker.
+module = ["geoalchemy2.*", "aiomqtt.*", "asyncpg.*", "yaml.*"]
+ignore_missing_imports = true
+
+# --------------------------------------------------------------------------
+[tool.pytest.ini_options]
+# pytest-asyncio 1.x: the `event_loop` fixture was REMOVED in 1.0. Any tutorial
+# that defines its own event_loop fixture is stale — use asyncio_mode=auto and
+# `loop_scope=` on fixtures instead.
+asyncio_mode = "auto"
+testpaths = ["packages", "apps/api"]
+addopts = "-q --strict-markers"
+markers = [
+  "docker: requires a running Docker daemon (skipped by default on this machine)",
+  "db: requires a reachable PostgreSQL + PostGIS",
+  "mqtt: requires a reachable MQTT broker",
+]

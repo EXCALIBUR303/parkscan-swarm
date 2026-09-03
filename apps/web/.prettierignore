@@ -1,0 +1,6 @@
+dist
+node_modules
+coverage
+package-lock.json
+# public/ holds files synced from sim/lot by scripts/sync-lot.mjs
+public
