@@ -107,7 +107,11 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done & verified · `[!]` blocke
   model) found and fixed along the way. See ADR-0007.
 
 ## Phase S — Stretch: `ros2-gz` backend (Sonnet)
-- [ ] **RTF spike first** (see ROADMAP) — that number gates everything below
+- [x] **RTF spike first** (see ROADMAP) — measured RTF ≈ 1.0 (1.0 and 0.9998 across two
+  samples, cross-checked from raw sim/real time deltas) on this host: Docker 29.7.2,
+  native arm64, software-rendered (`LIBGL_ALWAYS_SOFTWARE=1`), headless. Well above the
+  ~0.3 gate — Phase S is viable as specified, no RoboStack/pixi fallback needed. The
+  actual implementation below is not started.
 - [ ] `ros:jazzy-ros-base` arm64 Dockerfile (`http://packages.ros.org`, `libgl1-mesa-dri`, ogre2)
 - [ ] `rmw_zenoh_cpp` + router; one world, 3 namespaces
 - [ ] `Ros2WorldBackend` implementing the same Protocol; MQTT bridge
