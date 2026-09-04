@@ -77,18 +77,50 @@ no rotation, no offset, no unit conversion. This is a deliberate simplicity choi
 oversight: introducing a transform here would be a second, silent place reproducibility could
 drift between backends, on top of the reproducibility gap §4 already states plainly.
 
-### 3. Timing: lockstep via the world control service, not wall-clock sleep
+### 3. Timing: lockstep via the world control service — called by the bridge, relayed over MQTT
 
 Gazebo is launched **paused** (no `-r`), with a fixed physics `step_size` in the SDF matching
 `SimConfig.dt_s = 0.05` (e.g. `step_size: 0.001` with 50 iterations per call, or `step_size:
-0.05` with 1 — either is fine as long as it is exact, not approximated). `Ros2WorldBackend.step(dt)`
-calls the world's own `/world/<name>/control` service (already confirmed live and serving in
-the RTF spike's own log output) with a `multi_step` request for exactly `dt / step_size`
-iterations, then blocks on the response before returning. This is synchronous and wall-clock
-independent by construction: the call returns only once Gazebo has actually advanced by exactly
-`dt`, regardless of host load or actual RTF at that moment. `reset(seed, lot)` uses the same
-service's reset field to snap physics and poses back to the SDF's initial state, decomposed
-from the *separate* Python-side battery-RNG reset described next.
+0.05` with 1 — either is fine as long as it is exact, not approximated). The world's
+`/world/<name>/control` service (confirmed live and serving in the RTF spike's own log output —
+`"Serving world controls on [/world/shapes/control]..."`, and notably printed by `gz sim` itself
+with **zero ROS 2 nodes running** in that spike) supports a `multi_step` request to advance by a
+specific iteration count while paused, and a reset field to snap physics and poses back to the
+SDF's initial state.
+
+**Correction to an earlier draft of this ADR, caught before implementation started:** that
+service is native **Gazebo Transport** (`gz-transport`), not a ROS 2 service — a completely
+separate middleware from `rmw`/Zenoh, with its own discovery and its own (undocumented, in this
+repo) story for crossing the Docker Desktop VM boundary. It has exactly the same
+host-unreachability problem §"Context" already established for `rclpy`: nothing on this Mac can
+call it directly, whether or not `rclpy` is involved. So the bridge — the one process already
+living inside the container with native `gz-transport` access — must own every `multi_step` and
+reset call locally, and relay the result to `Ros2WorldBackend` over the same MQTT channel
+already carrying `state`/`cmd`, rather than the backend calling the control service itself as an
+earlier draft of this section assumed.
+
+Two more request/response topics, added to §6's table: `.../control/step` (backend → bridge,
+`{"request_id", "iterations"}`) and `.../control/step_ack` (bridge → backend, published only
+once the bridge's local `multi_step` call has actually returned — i.e., once Gazebo has
+genuinely advanced), plus the reset equivalents. `Ros2WorldBackend.step(dt)` publishes a step
+request and **blocks on receiving the matching `step_ack`** (by `request_id`, guarding against a
+stale or duplicate ack) before returning — synchronous and wall-clock-independent by
+construction, exactly as intended, just relayed through one more hop than originally drafted.
+`request_id` exists because MQTT is pub/sub, not RPC: without it there is no way to tell "the
+ack for the step I just asked for" apart from "an ack for some earlier request," particularly
+across a `reset()`.
+
+These two topics use **QoS 1**, deliberately different from `state`/`cmd`'s QoS 0 (§6): a lost
+step or reset ack would hang `Ros2WorldBackend` in a blocking wait forever, where a lost `state`
+sample is just superseded by the next one a few milliseconds later.
+
+**Still an open, implementation-time question, not resolved here:** whether `multi_step`'s
+response genuinely blocks until physics has advanced (making the bridge's own call synchronous,
+which this design assumes) or is acknowledged optimistically before the steps complete. The RTF
+spike confirmed the service *exists and is being served*; it did not exercise `multi_step`
+specifically. Verify this empirically before trusting the lockstep guarantee — the RTF spike's
+own two undocumented bugs (found only by running it, not by reading Gazebo's docs) are the
+reason this is flagged rather than assumed.
 
 ### 4. Battery: reuse the pure proxy, own it in `Ros2WorldBackend`, propose relocating it
 
@@ -135,12 +167,17 @@ dashboard or any other consumer should ever subscribe to:
 |---|---|---|---|
 | `parkscan/bridge/v1/{robot_id}/state` | bridge → backend | `{"stamp_ns", "pose": {"x_m","y_m","theta_rad"}, "twist": {"v_mps","omega_radps"}, "ranges": [...]}` | 0 |
 | `parkscan/bridge/v1/{robot_id}/cmd` | backend → bridge | `{"v_mps", "omega_radps"}` | 0 |
+| `parkscan/bridge/v1/control/step` | backend → bridge | `{"request_id", "iterations"}` | 1 |
+| `parkscan/bridge/v1/control/step_ack` | bridge → backend | `{"request_id"}` — published only once the bridge's local `multi_step` call returns | 1 |
+| `parkscan/bridge/v1/control/reset` | backend → bridge | `{"request_id", "seed"}` | 1 |
+| `parkscan/bridge/v1/control/reset_ack` | bridge → backend | `{"request_id"}` | 1 |
 
-QoS 0, deliberately different from the app-level contract's QoS 1: this is a live-state relay
-sampled every physics step — a dropped or superseded message is simply stale data waiting to be
-overwritten by the next one, not an event whose loss matters (unlike a detection or a lease
-grant). `battery_soc` is never on this channel — §4 already assigns that field to
-`Ros2WorldBackend` alone, so the bridge does not need to know battery parameters at all.
+`state`/`cmd` use QoS 0: this is a live-state relay sampled every physics step — a dropped or
+superseded message is simply stale data waiting to be overwritten by the next one, not an event
+whose loss matters (unlike a detection or a lease grant). `battery_soc` is never on this
+channel — §4 already assigns that field to `Ros2WorldBackend` alone, so the bridge does not need
+to know battery parameters at all. `control/*` uses QoS 1, per §3: a lost step or reset ack
+hangs a blocking wait forever, unlike a superseded state sample.
 
 ### 7. Runner plumbing (expected, not a Protocol violation)
 
@@ -186,12 +223,14 @@ TASKS.md's verify step means *them*, not the runner's own bootstrap code.
   `packages/parkscan_sim` test suite, and needs its own.
 - ⚠️ This ADR does not resolve, and does not attempt to resolve, whether the lidar/camera sensor
   plugins available in `ros_gz_sim` for Jazzy actually support the exact ray count/FOV
-  `SensorParams` specifies, or whether Gazebo's spawn/reset semantics behave exactly as the
-  world-control service's documentation implies under `rmw_zenoh_cpp` specifically (vs. the
-  default DDS the upstream docs are usually written against). Both are implementation-time
-  discoveries, not design decisions — flagged here so they are looked for deliberately rather
-  than found by surprise, the way the RTF spike's own command had two undocumented bugs
-  (missing `setup.bash` sourcing, `-v 4` not actually reporting RTF) that only surfaced by
+  `SensorParams` specifies, or whether `multi_step`'s response genuinely blocks until physics has
+  advanced rather than acknowledging optimistically (§3's still-open question — this is a
+  `gz-transport` question, not an `rmw_zenoh_cpp` one; the control call never touches ROS 2's
+  middleware at all, only the bridge's local, same-container `gz-transport` connection). Both are
+  implementation-time discoveries, not design decisions — flagged here so they are looked for
+  deliberately rather than found by surprise, the way the RTF spike's own command had two
+  undocumented bugs (missing `setup.bash` sourcing, `-v 4` not actually reporting RTF) that only
+  surfaced by
   running it.
 
 ## What this ADR does not do
