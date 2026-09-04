@@ -54,7 +54,7 @@ from typing import NoReturn
 import numpy as np
 
 from parkscan_core.lot import LaneNode, LotSpec
-from parkscan_core.types import BayState, Pose2D, RobotId, SensorFrame, TwistCmd
+from parkscan_core.types import BayState, Pose2D, RobotId, SensorFrame, Severity, TwistCmd
 from parkscan_sim.battery import charge_soc, drain_soc
 from parkscan_sim.config import SimConfig
 from parkscan_sim.kinematics import clamp_twist, integrate_pose, wrap_angle
@@ -103,6 +103,22 @@ class _RobotState:
     charging: bool
 
 
+@dataclass(frozen=True, slots=True)
+class Pothole:
+    """One simulated defect on the driving surface, as ground truth.
+
+    This is what the world KNOWS. The perception layer is never handed it — it receives
+    image-space boxes and must recover the position itself — which is precisely what makes
+    the geolocation error in `make eval` a measurement rather than a lookup.
+    """
+
+    id: str
+    x_m: float
+    y_m: float
+    radius_m: float
+    severity: Severity
+
+
 class SimLite:
     """A deterministic 2D kinematic world implementing
     :class:`~parkscan_core.world.WorldBackend`.
@@ -127,6 +143,7 @@ class SimLite:
         "_lot",
         "_occupied",
         "_order",
+        "_potholes",
         "_rng",
         "_robots",
         "_seed",
@@ -198,6 +215,7 @@ class SimLite:
         self._order = []
         self._collisions = []
         self._active = set()
+        self._potholes: tuple[Pothole, ...] = ()
         self._tick = 0
         self._dt_ns = round(self._cfg.dt_s * _NS_PER_S)
 
@@ -234,6 +252,11 @@ class SimLite:
                 theta_rad=wrap_angle(headings[index] + float(jitter[index])),
             )
             self.add_robot(pose, battery_soc=float(socs[index]))
+
+        # Draw 4 of 4: pothole placement. Deliberately drawn LAST so that draws 1-3
+        # keep their exact sequence and every previously-recorded trajectory still
+        # reproduces bit for bit.
+        self._potholes = _place_potholes(lot, rng, self._cfg)
 
         self._detect_collisions()
 
@@ -381,6 +404,10 @@ class SimLite:
             msg = f"soc must be in [0, 1], got {soc}"
             raise ValueError(msg)
         self._state(robot).battery_soc = soc
+
+    def potholes(self) -> tuple[Pothole, ...]:
+        """Simulated ground-truth defects. Stable for the life of a ``reset``."""
+        return self._potholes
 
     def is_charging(self, robot: RobotId) -> bool:
         """Whether ``robot`` charged on the most recent :meth:`step`."""
@@ -568,3 +595,45 @@ def _nominal_headings(lot: LotSpec, nodes: Sequence[LaneNode]) -> tuple[float, .
         target = node_map[min(neighbours)]
         headings.append(math.atan2(target.y_m - node.y_m, target.x_m - node.x_m))
     return tuple(headings)
+
+
+def _place_potholes(lot: LotSpec, rng: np.random.Generator, cfg: SimConfig) -> tuple[Pothole, ...]:
+    """Scatter defects along the drive aisles, deterministically from ``rng``.
+
+    Aisles, not stalls: a robot inspects the surface it drives on, and a defect under a
+    parked car is one neither this fleet nor a real one could see. Severity is a function
+    of radius so it is explainable rather than an independent random label.
+    """
+    if cfg.pothole_count <= 0:
+        return ()
+
+    # One aisle centreline per zone band, taken from the authored zone geometry.
+    bands = sorted({min(p[1] for p in zone.polygon) for zone in lot.zones})
+    if not bands:
+        return ()
+    centrelines = [band + cfg.aisle_offset_m for band in bands]
+
+    xs = rng.uniform(2.0, lot.size_m.w - 2.0, size=cfg.pothole_count)
+    lanes = rng.integers(0, len(centrelines), size=cfg.pothole_count)
+    offsets = rng.uniform(-1.5, 1.5, size=cfg.pothole_count)
+    radii = rng.uniform(cfg.pothole_radius_min_m, cfg.pothole_radius_max_m, size=cfg.pothole_count)
+
+    out: list[Pothole] = []
+    for index in range(cfg.pothole_count):
+        radius = float(radii[index])
+        if radius < 0.20:
+            severity = Severity.LOW
+        elif radius < 0.33:
+            severity = Severity.MEDIUM
+        else:
+            severity = Severity.HIGH
+        out.append(
+            Pothole(
+                id=f"pothole_{index + 1:03d}",
+                x_m=float(xs[index]),
+                y_m=float(centrelines[int(lanes[index])] + float(offsets[index])),
+                radius_m=radius,
+                severity=severity,
+            )
+        )
+    return tuple(out)

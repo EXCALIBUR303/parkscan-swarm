@@ -584,3 +584,50 @@ body {
     transition: none;
   }
 }
+
+/* Detections ------------------------------------------------------------- */
+.detections {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.detections__row {
+  font-size: 0.78rem;
+  line-height: 1.35;
+  padding: 0.35rem 0.5rem;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.04);
+}
+.detections__meta {
+  display: block;
+  opacity: 0.72;
+}
+/* Severity uses Okabe-Ito, and never red-vs-green. The word is always present next to
+   the swatch so the level survives greyscale and colour-vision deficiency alike. */
+.sev {
+  display: inline-block;
+  min-width: 3.9rem;
+  padding: 0 0.35rem;
+  border-radius: 3px;
+  font-weight: 600;
+  text-align: center;
+  color: #000;
+}
+.sev--low {
+  background: #0072b2;
+  color: #fff;
+}
+.sev--medium {
+  background: #e69f00;
+}
+.sev--high {
+  background: #d55e00;
+  color: #fff;
+}
+.sev--unknown {
+  background: rgba(255, 255, 255, 0.25);
+  color: #fff;
+}

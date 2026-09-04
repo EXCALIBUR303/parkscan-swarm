@@ -1,8 +1,11 @@
 import type { LoadedLot } from '../lib/lot';
 import { CONNECTION_LABEL, batteryPercent, capitalise, humaniseId } from '../lib/robot';
 import type { LotStatus } from '../lib/useLot';
+import { DEFAULT_MAX_RANGE_M } from '../lib/geoloc';
 import {
+  MAX_DETECTIONS,
   useBatteryBand,
+  useDetections,
   useConnection,
   useRobot,
   useRobotIds,
@@ -58,6 +61,7 @@ export function SidePanel({ status, lot, error, onRetry }: SidePanelProps): Reac
       {status === 'ready' && lot !== null && <LotSummary lot={lot} />}
 
       <FleetSection />
+      <DetectionSection />
     </aside>
   );
 }
@@ -171,6 +175,59 @@ function FleetSection(): React.JSX.Element {
             zero.
           </p>
         </div>
+      )}
+    </section>
+  );
+}
+
+/**
+ * Detections.
+ *
+ * Rejected geolocations are LISTED here but never plotted on the map. That split is the
+ * point: the operator still learns the detector fired, without the map asserting a
+ * position the pipeline explicitly refused to compute (criterion C11).
+ */
+function DetectionSection(): React.JSX.Element {
+  const detections = useDetections();
+  const recent = detections.slice(-8).reverse();
+  const rejected = detections.filter((d) => !d.geolocValid).length;
+
+  return (
+    <section className="side__section" aria-labelledby="detections-heading">
+      <h3 id="detections-heading">Detections</h3>
+
+      {detections.length === 0 ? (
+        <div className="state state--empty" data-testid="detections-empty">
+          <p>No detections yet.</p>
+          <p className="state__detail">
+            The perception stage reports a pothole only when its ground contact point falls inside
+            the {DEFAULT_MAX_RANGE_M} m range gate. Nothing has been in range yet.
+          </p>
+        </div>
+      ) : (
+        <>
+          <p className="state__detail" data-testid="detection-summary">
+            {detections.length} held
+            {detections.length >= MAX_DETECTIONS ? ' (oldest discarded)' : ''}
+            {rejected > 0 ? `, ${rejected} not geolocated` : ''}
+          </p>
+          <ul className="detections" data-testid="detection-list">
+            {recent.map((d) => (
+              <li key={d.id} className="detections__row">
+                <span className={`sev sev--${d.severity ?? 'unknown'}`}>
+                  {d.severity ?? 'unrated'}
+                </span>{' '}
+                <span>{d.kind.replace(/_/g, ' ')}</span>{' '}
+                <span className="detections__meta">
+                  {(d.confidence * 100).toFixed(0)}% conf · {d.rangeM.toFixed(1)} m ·{' '}
+                  {d.position === null
+                    ? 'not geolocated'
+                    : `${d.position.x.toFixed(1)}, ${d.position.y.toFixed(1)} m`}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
       )}
     </section>
   );

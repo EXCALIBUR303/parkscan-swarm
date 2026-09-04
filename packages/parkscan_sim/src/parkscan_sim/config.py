@@ -70,6 +70,25 @@ class SimConfig:
     dock command, keeps the simulator ignorant of the autonomy layer's intent."""
 
     charge_speed_eps: float = 1e-3
+
+    pothole_count: int = 24
+    """How many potholes to scatter on the driving surface.
+
+    Potholes are *simulated ground truth*: sim-lite owns the world, so it owns where the
+    damage is. The perception layer never sees this — it receives only image-space boxes —
+    which is what keeps the geolocation error an honest measurement rather than a lookup.
+    """
+
+    pothole_radius_min_m: float = 0.12
+    pothole_radius_max_m: float = 0.45
+    """Radius range. A pothole below ~0.1 m is not worth reporting and one above ~0.5 m
+    would be a sinkhole, so the band is deliberately narrow and is a modelling choice,
+    not a measurement of real road damage."""
+
+    aisle_offset_m: float = 5.0
+    """Distance from a zone band's south edge to the drive-aisle centreline. Matches the
+    authored lot (2 m kerb + a 6 m aisle spanning y0+2..y0+8)."""
+
     """"Stationary" tolerance for the docking rule, in m/s and rad/s."""
 
     def __post_init__(self) -> None:

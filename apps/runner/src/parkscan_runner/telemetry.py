@@ -9,13 +9,19 @@ entitled to make that claim (ACCEPTANCE H1).
 from __future__ import annotations
 
 import datetime as dt
+import math
 from typing import Any
 
 from parkscan_agent.robot import TelemetrySample
+from parkscan_perception.geolocation import GeolocResult
 
-from parkscan_core.types import DataSource
+from parkscan_core.types import DataSource, Detection
 
 _NS_PER_S = 1_000_000_000
+
+#: Stand-in for an infinite range, so the value fits a SQL ``real``. Only reached on an
+#: above-horizon rejection, where the reason field carries the real explanation.
+_UNBOUNDED_RANGE_M = 1.0e6
 
 
 def sim_stamp(stamp_ns: int, epoch: dt.datetime) -> str:
@@ -67,3 +73,48 @@ def progress_payload(sample: TelemetrySample, *, epoch: dt.datetime) -> dict[str
         "cells_done": list(sample.covered_cells),
         "stamp": sim_stamp(sample.stamp_ns, epoch),
     }
+
+
+def detection_payload(
+    detection: Detection,
+    result: GeolocResult,
+    *,
+    data_source: DataSource,
+    stamp_ns: int,
+    epoch: dt.datetime,
+) -> dict[str, Any]:
+    """Serialise one detection to the wire shape in docs/API_CONTRACT.md.
+
+    ``local_x``/``local_y`` are present ONLY when the geolocation is valid. The API
+    enforces the same rule (a valid result must carry a point, an invalid one must not),
+    because a rejected ray has no world position and storing a plausible-looking one is
+    exactly the failure C11 exists to prevent.
+
+    ``range_m`` is finite even on a range-gate rejection — a rejection at 6.5 m is a
+    different fact from one at 40 m — but ``above_horizon`` yields infinity, which is not
+    representable in a SQL ``real``, so it is clamped to the gate distance and the reason
+    carries the detail.
+    """
+    valid = result.valid
+    range_m = result.range_m if math.isfinite(result.range_m) else _UNBOUNDED_RANGE_M
+    payload: dict[str, Any] = {
+        "kind": str(detection.kind),
+        "det_source": str(detection.det_source),
+        "data_source": str(data_source),
+        "detector_name": detection.detector_name,
+        "confidence": detection.confidence,
+        "bbox": {
+            "x1": detection.bbox.x1,
+            "y1": detection.bbox.y1,
+            "x2": detection.bbox.x2,
+            "y2": detection.bbox.y2,
+        },
+        "range_m": range_m,
+        "geoloc_valid": valid,
+        "severity": str(detection.severity) if detection.severity is not None else None,
+        "stamp": sim_stamp(stamp_ns, epoch),
+    }
+    if valid and result.point is not None:
+        payload["local_x"] = result.point[0]
+        payload["local_y"] = result.point[1]
+    return payload

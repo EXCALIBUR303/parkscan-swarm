@@ -78,10 +78,77 @@ export interface MalformedEvent {
   readonly detail: string;
 }
 
+export interface DetectionView {
+  id: string;
+  robotId: string;
+  kind: string;
+  /** Provenance, straight from the server. The SIMULATED styling reads THIS. */
+  detSource: string;
+  detectorName: string;
+  confidence: number;
+  severity: 'low' | 'medium' | 'high' | null;
+  /** Lot metres. Present only when the geolocation was accepted. */
+  position: { x: number; y: number } | null;
+  rangeM: number;
+  geolocValid: boolean;
+  receivedAt: number;
+}
+
+export interface DetectionEvent {
+  kind: 'detection';
+  detection: DetectionView;
+}
+
 export type LiveEvent =
-  TelemetryEvent | RunStateEvent | LagEvent | ServerErrorEvent | MalformedEvent;
+  TelemetryEvent | RunStateEvent | DetectionEvent | LagEvent | ServerErrorEvent | MalformedEvent;
 
 /* -------------------------------------------------------------------- parsing -- */
+
+const SEVERITIES = new Set(['low', 'medium', 'high']);
+
+/**
+ * One detection off the wire.
+ *
+ * `local_x`/`local_y` are present only when the server accepted the geolocation. A
+ * rejected ray has NO world position, and inventing one here — snapping it to the robot,
+ * say — would put a confident, wrong pothole on the map. That is the exact failure
+ * criterion C11 exists to prevent, so a rejected detection carries `position: null` and
+ * is listed but never plotted.
+ */
+function parseDetection(payload: Record<string, unknown>, now: () => number): LiveEvent {
+  const id = asString(payload['id']);
+  const robotId = asString(payload['robot_id']);
+  const kind = asString(payload['kind']);
+  const detSource = asString(payload['det_source']);
+  if (id === null || robotId === null || kind === null || detSource === null) {
+    return { kind: 'malformed', detail: 'detection missing id/robot_id/kind/det_source' };
+  }
+
+  const x = asFiniteNumber(payload['local_x']);
+  const y = asFiniteNumber(payload['local_y']);
+  const geolocValid = payload['geoloc_valid'] === true;
+  const severity = asString(payload['severity']);
+
+  return {
+    kind: 'detection',
+    detection: {
+      id,
+      robotId,
+      kind,
+      detSource,
+      detectorName: asString(payload['detector_name']) ?? 'unknown',
+      confidence: asFiniteNumber(payload['confidence']) ?? 0,
+      severity:
+        severity !== null && SEVERITIES.has(severity)
+          ? (severity as 'low' | 'medium' | 'high')
+          : null,
+      position: geolocValid && x !== null && y !== null ? { x, y } : null,
+      rangeM: asFiniteNumber(payload['range_m']) ?? Number.NaN,
+      geolocValid,
+      receivedAt: now(),
+    },
+  };
+}
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -208,8 +275,10 @@ export function parseLiveMessage(raw: string, now: () => number = Date.now): Liv
     };
   }
 
-  // detection / zone / alert / assignment are Phase 3+. Ignoring them is a decision,
-  // not an oversight, so they are counted rather than dropped on the floor.
+  if (type === 'detection') return parseDetection(payload, now);
+
+  // zone / alert / assignment arrive in Phase 4. Ignoring them is a decision, not an
+  // oversight, so they are counted as malformed rather than dropped on the floor.
   return { kind: 'malformed', detail: `no handler for frame type ${type}` };
 }
 
@@ -294,11 +363,13 @@ export class FrameBuffer {
 /**
  * Topics we actually consume today.
  *
- * The server treats "no subscribe" as "send everything"; naming the two frame types the
- * dashboard has code for keeps detection/zone/alert traffic off the wire until Phase 3
- * gives them a renderer, instead of receiving them and counting them as unhandled.
+ * The server treats "no subscribe" as "send everything"; naming only the frame types the
+ * dashboard has a renderer for keeps the rest off the wire instead of receiving it and
+ * counting it as unhandled. `detection` joined the list in Phase 3, when the map gained
+ * severity pins and the panel gained a list. `zone`, `alert` and `assignment` stay off
+ * until Phase 4 renders them.
  */
-export const DEFAULT_TOPICS: readonly string[] = ['telemetry', 'run_state'];
+export const DEFAULT_TOPICS: readonly string[] = ['telemetry', 'run_state', 'detection'];
 
 export interface LiveSocketOptions {
   /** Defaults to `/ws/live` on the page's own origin (the Vite dev proxy handles it). */

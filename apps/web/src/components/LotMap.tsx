@@ -4,9 +4,15 @@ import Map, { Layer, Marker, NavigationControl, Source } from 'react-map-gl/mapl
 
 import { lotToLngLat, type LotOrigin } from '../lib/enu';
 import { featuresOfKind, withCoverage, type LoadedLot } from '../lib/lot';
-import { BAY_COLOUR, LOT_COLOUR, coverageInterpolateStops } from '../lib/palette';
+import { BAY_COLOUR, LOT_COLOUR, SEVERITY_COLOUR, coverageInterpolateStops } from '../lib/palette';
 import { batteryPercent, describeRobot } from '../lib/robot';
-import { useBatteryBand, useCoverageByZone, useRobot, useRobotIds } from '../store';
+import {
+  useBatteryBand,
+  useCoverageByZone,
+  usePlottableDetections,
+  useRobot,
+  useRobotIds,
+} from '../store';
 import { MapLegend } from './MapLegend';
 
 /**
@@ -75,6 +81,35 @@ export interface LotMapProps {
 export function LotMap({ lot }: LotMapProps): React.JSX.Element {
   const coverageByZone = useCoverageByZone();
   const robotIds = useRobotIds();
+  const plottable = usePlottableDetections();
+
+  // Only geolocated detections become features. A rejected ray has no world position
+  // (criterion C11) and is shown in the side panel instead — plotting it at a guessed
+  // location would be a confident lie on a map people are meant to trust.
+  const detectionFeatures = useMemo(
+    () => ({
+      type: 'FeatureCollection' as const,
+      features: plottable.map((d) => ({
+        type: 'Feature' as const,
+        id: d.id,
+        properties: {
+          id: d.id,
+          severity: d.severity ?? 'low',
+          confidence: d.confidence,
+          detSource: d.detSource,
+        },
+        geometry: {
+          type: 'Point' as const,
+          // Spread to a mutable tuple: lotToLngLat returns a readonly pair, and GeoJSON's
+          // Position type is mutable.
+          coordinates: [
+            ...lotToLngLat({ x: d.position?.x ?? 0, y: d.position?.y ?? 0 }, lot.origin),
+          ],
+        },
+      })),
+    }),
+    [plottable, lot.origin],
+  );
 
   /*
    * Marker position is CSS-transitioned between telemetry frames, and MapLibre writes
@@ -168,6 +203,42 @@ export function LotMap({ lot }: LotMapProps): React.JSX.Element {
               'circle-color': LOT_COLOUR.chargingBay,
               'circle-stroke-color': '#FFFFFF',
               'circle-stroke-width': 1.5,
+            }}
+          />
+        </Source>
+
+        <Source id="detections" type="geojson" data={detectionFeatures} promoteId="id">
+          {/*
+            Severity carries in BOTH colour and radius. Okabe-Ito hues stay distinguishable
+            for the ~8% of men with a colour-vision deficiency, and the size ramp means the
+            level survives a greyscale print or a screenshot run through a filter — a
+            colour-only encoding would not.
+          */}
+          <Layer
+            id="detection-point"
+            type="circle"
+            paint={{
+              'circle-radius': [
+                'match',
+                ['get', 'severity'],
+                'high',
+                8,
+                'medium',
+                6,
+                4,
+              ] as unknown as number,
+              'circle-color': [
+                'match',
+                ['get', 'severity'],
+                'high',
+                SEVERITY_COLOUR.high,
+                'medium',
+                SEVERITY_COLOUR.medium,
+                SEVERITY_COLOUR.low,
+              ] as unknown as string,
+              'circle-stroke-color': '#FFFFFF',
+              'circle-stroke-width': 1.5,
+              'circle-opacity': 0.9,
             }}
           />
         </Source>

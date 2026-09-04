@@ -7,6 +7,7 @@ import {
   parseLiveMessage,
   type FlushClock,
   type LiveEvent,
+  DEFAULT_TOPICS,
 } from './socket';
 import type { ConnectionStatus } from './robot';
 import { FakeWebSocket } from '../test/fakeWebSocket';
@@ -263,10 +264,17 @@ describe('LiveSocket', () => {
       expect(FakeWebSocket.latest().sent).toHaveLength(1);
     });
 
+    // Asserted against DEFAULT_TOPICS rather than a literal list: the point of the test
+    // is that the socket subscribes to exactly what it can render, and hardcoding the
+    // list here would mean editing this test every time a renderer is added.
     expect(FakeWebSocket.latest().sentJson()[0]).toEqual({
       type: 'subscribe',
-      topics: ['telemetry', 'run_state'],
+      topics: [...DEFAULT_TOPICS],
     });
+    // The dashboard must never subscribe to a frame type it has no handler for — those
+    // would arrive and be counted as malformed.
+    expect(DEFAULT_TOPICS).toContain('telemetry');
+    expect(DEFAULT_TOPICS).toContain('detection');
 
     // A dropped connection loses the server-side channel, so the subscription must be
     // re-sent rather than assumed to have survived.
@@ -275,10 +283,17 @@ describe('LiveSocket', () => {
       expect(FakeWebSocket.instances).toHaveLength(2);
       expect(FakeWebSocket.latest().sent).toHaveLength(1);
     });
+    // Asserted against DEFAULT_TOPICS rather than a literal list: the point of the test
+    // is that the socket subscribes to exactly what it can render, and hardcoding the
+    // list here would mean editing this test every time a renderer is added.
     expect(FakeWebSocket.latest().sentJson()[0]).toEqual({
       type: 'subscribe',
-      topics: ['telemetry', 'run_state'],
+      topics: [...DEFAULT_TOPICS],
     });
+    // The dashboard must never subscribe to a frame type it has no handler for — those
+    // would arrive and be counted as malformed.
+    expect(DEFAULT_TOPICS).toContain('telemetry');
+    expect(DEFAULT_TOPICS).toContain('detection');
   });
 
   it('reports reconnecting — not error — when the server drops the connection', async () => {

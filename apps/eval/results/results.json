@@ -1,0 +1,255 @@
+{
+  "config": {
+    "camera": {
+      "cx": 320.0,
+      "cy": 240.0,
+      "fx": 457.0073621574767,
+      "fy": 457.0073621574767,
+      "height": 480,
+      "hfov_rad": 1.2217304763960306,
+      "mount_height_m": 0.45,
+      "mount_pitch_rad": -0.2617993877991494,
+      "width": 640
+    },
+    "detector_noise": {
+      "confidence_alpha": 8.0,
+      "confidence_beta": 2.0,
+      "false_positive_rate": 0.02,
+      "fp_max_size_px": 64.0,
+      "fp_min_size_px": 12.0,
+      "jitter_px": 2.0,
+      "miss_rate": 0.05
+    },
+    "error_budget": {
+      "height_sigma_m": 0.005,
+      "pitch_sigma_rad": 0.008726646259971648,
+      "position_sigma_m": 0.02,
+      "yaw_sigma_rad": 0.008726646259971648
+    },
+    "match_gate_px": 4.0,
+    "max_range_m": 6.0,
+    "relaxed_max_range_m": 1000.0,
+    "scene": {
+      "camera_id": "cam_front",
+      "camera_period_ticks": 4,
+      "frame_margin_px": 8.0,
+      "lateral_offsets_m": [
+        0.0,
+        1.1,
+        -0.8,
+        0.5,
+        -1.4
+      ],
+      "lead_in_m": 3.0,
+      "max_steps": 4000,
+      "min_box_px": 8.0,
+      "speed_mps": 1.0,
+      "tail_m": 1.0,
+      "target_size_m": 0.45,
+      "target_spacing_m": 2.5,
+      "zone_id": "zone_01"
+    },
+    "score_threshold": 0.25,
+    "seed": 42
+  },
+  "counts": {
+    "detections": 1209,
+    "frames": 201,
+    "matched_detections": 1206,
+    "target_sightings": 1272,
+    "unmatched_detections": 3,
+    "unreported_sightings": 66
+  },
+  "detector_contract": {
+    "failed": 0,
+    "failures": [],
+    "passed": 1,
+    "total": 1
+  },
+  "geolocation_error": {
+    "by_range": [
+      {
+        "count": 40,
+        "hi_m": 2.0,
+        "label": "0-2 m",
+        "lo_m": 0.0,
+        "mean_m": 0.05014949466148836,
+        "median_m": 0.0369447234419743,
+        "p95_m": 0.10600468178598539
+      },
+      {
+        "count": 132,
+        "hi_m": 4.0,
+        "label": "2-4 m",
+        "lo_m": 2.0,
+        "mean_m": 0.17587451749331254,
+        "median_m": 0.14123376574252341,
+        "p95_m": 0.4648913305316572
+      },
+      {
+        "count": 117,
+        "hi_m": 6.0,
+        "label": "4-6 m",
+        "lo_m": 4.0,
+        "mean_m": 0.39951809344209527,
+        "median_m": 0.3705733694913435,
+        "p95_m": 0.8410786096147025
+      },
+      {
+        "count": 28,
+        "hi_m": 8.0,
+        "label": "6-8 m",
+        "lo_m": 6.0,
+        "mean_m": 0.9984244657732013,
+        "median_m": 0.9204226180576176,
+        "p95_m": 1.828031925986823
+      },
+      {
+        "count": 0,
+        "hi_m": Infinity,
+        "label": "8+ m",
+        "lo_m": 8.0,
+        "mean_m": NaN,
+        "median_m": NaN,
+        "p95_m": NaN
+      }
+    ],
+    "overall": {
+      "count": 317,
+      "mean_m": 0.315207943438333,
+      "median_m": 0.18364819544235028,
+      "p95_m": 0.9855818684541051
+    }
+  },
+  "geolocation_error_gate_relaxed": {
+    "by_range": [
+      {
+        "count": 40,
+        "hi_m": 2.0,
+        "label": "0-2 m",
+        "lo_m": 0.0,
+        "mean_m": 0.05014949466148836,
+        "median_m": 0.0369447234419743,
+        "p95_m": 0.10600468178598539
+      },
+      {
+        "count": 132,
+        "hi_m": 4.0,
+        "label": "2-4 m",
+        "lo_m": 2.0,
+        "mean_m": 0.17587451749331254,
+        "median_m": 0.14123376574252341,
+        "p95_m": 0.4648913305316572
+      },
+      {
+        "count": 135,
+        "hi_m": 6.0,
+        "label": "4-6 m",
+        "lo_m": 4.0,
+        "mean_m": 0.47145538173129153,
+        "median_m": 0.3865341585233644,
+        "p95_m": 1.0941178420426065
+      },
+      {
+        "count": 119,
+        "hi_m": 8.0,
+        "label": "6-8 m",
+        "lo_m": 6.0,
+        "mean_m": 0.8844753577246863,
+        "median_m": 0.7495335103227327,
+        "p95_m": 2.2255588838202165
+      },
+      {
+        "count": 223,
+        "hi_m": 12.0,
+        "label": "8-12 m",
+        "lo_m": 8.0,
+        "mean_m": 1.9135349870059395,
+        "median_m": 1.383247584639003,
+        "p95_m": 5.126734727288355
+      },
+      {
+        "count": 194,
+        "hi_m": 16.0,
+        "label": "12-16 m",
+        "lo_m": 12.0,
+        "mean_m": 3.8877663781728136,
+        "median_m": 2.736287742607536,
+        "p95_m": 10.5372255423121
+      },
+      {
+        "count": 162,
+        "hi_m": 20.0,
+        "label": "16-20 m",
+        "lo_m": 16.0,
+        "mean_m": 6.582162209509981,
+        "median_m": 4.6210143676813145,
+        "p95_m": 21.721962131477245
+      },
+      {
+        "count": 194,
+        "hi_m": Infinity,
+        "label": "20+ m",
+        "lo_m": 20.0,
+        "mean_m": 16.09552546716523,
+        "median_m": 7.077164322750826,
+        "p95_m": 52.86404131192176
+      }
+    ],
+    "max_range_m": 1000.0,
+    "note": "Same detections and the same perturbed pose, re-geolocated with the range gate raised to 1000 m. This is a sensitivity analysis that justifies the 6 m production gate; it is not what the running system stores.",
+    "overall": {
+      "count": 1199,
+      "mean_m": 4.640456762499634,
+      "median_m": 1.369637875192008,
+      "p95_m": 14.698735665788112
+    }
+  },
+  "latency": {
+    "detect": {
+      "count": 201,
+      "p50_ms": 0.047582987463101745,
+      "p95_ms": 0.0669579894747585
+    },
+    "frame_total": {
+      "count": 201,
+      "p50_ms": 0.11216700659133494,
+      "p95_ms": 0.16183301340788603
+    },
+    "geolocate": {
+      "count": 201,
+      "p50_ms": 0.06416701944544911,
+      "p95_ms": 0.09175000013783574
+    },
+    "note": "Wall-clock measurements of this machine. They are the only part of this file that changes between two runs of the same seed, and they say nothing about a real detector: SimulatedDetector performs no inference.",
+    "reproducible": false,
+    "unit": "milliseconds per camera frame, not per detection"
+  },
+  "rejection": {
+    "reasons": {
+      "above_horizon": 7,
+      "accepted": 320,
+      "beyond_max_range": 882
+    },
+    "rejected": 889,
+    "rejection_rate": 0.7353184449958643,
+    "total": 1209
+  },
+  "run": {
+    "config_hash": "bf35dd2ae0561ad279761f96f5da729b5ded535bc7e93c239c6ac12007c2564e",
+    "git_dirty": true,
+    "git_sha": "c0840b0aa35a4f255892597b4def05ac82287ed8",
+    "libraries": {
+      "numpy": "2.5.2",
+      "parkscan-core": "0.1.0",
+      "parkscan-eval": "0.1.0",
+      "parkscan-perception": "0.1.0",
+      "parkscan-sim": "0.1.0"
+    },
+    "python": "3.12.12",
+    "seed": 42
+  },
+  "schema": "parkscan-eval/results/v1",
+  "tier": 1,
+  "tier_note": "Every figure in this file is Tier 1: the behaviour of THIS pipeline against known simulated ground truth, under the stated error budget. Nothing here is a measurement of real-world detection accuracy, and no mAP, precision or recall appears because a simulated detector cannot produce one. See EVAL.md."
+}

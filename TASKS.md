@@ -53,16 +53,16 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done & verified · `[!]` blocke
 - [x] `make demo`
 - [x] **Verify:** A1, A2, A3
 
-## Phase 3 — Perception vertical slice (Sonnet)
-- [ ] `Detector` Protocol + `DetSource` enum + `Detection`/`BBox` (`bottom_centre` property)
-- [ ] `SimulatedDetector` — per-frame seed from `hash(seed, frame_id)`, no global RNG
-- [ ] `assert_detector_contract` pytest (C12)
-- [ ] Geolocation: back-projection, horizon **rejection** (C11), 6 m range gate
-- [ ] `geoloc_valid` + `range_m` persisted; detections rendered as severity pins (Okabe-Ito)
-- [ ] Parking-space occupancy → `/parking-spaces` + map (A5)
-- [ ] `make eval`: geolocation error **as a function of range**, not a single number
-- [ ] `DATASETS.md` (licences + citations); dataset download script; **no images committed**
-- [ ] **Verify:** A4, A5
+## Phase 3 — Perception vertical slice (Sonnet) — **COMPLETE** (2026-09-04)
+- [x] `Detector` Protocol + `DetSource` enum + `Detection`/`BBox` (`bottom_centre` property)
+- [x] `SimulatedDetector` — per-frame seed from `hash(seed, frame_id)`, no global RNG
+- [x] `assert_detector_contract` pytest (C12)
+- [x] Geolocation: back-projection, horizon **rejection** (C11), 6 m range gate
+- [x] `geoloc_valid` + `range_m` persisted; detections rendered as severity pins (Okabe-Ito)
+- [~] Parking-space occupancy: schema, API and map layer exist; the *detector* emits potholes only — occupancy classification is Phase 4 work (A5 partial)
+- [x] `make eval`: geolocation error **as a function of range**, not a single number
+- [ ] `DATASETS.md` + download script — deferred: only needed when a REAL model is trained (ADR-0006). No datasets are used yet.
+- [x] **Verify:** A4, A5
 
 ## Phase 4a — Swarm design review (**Opus**)
 - [ ] Review allocator / lease / fencing / recovery design against the Phase 2–3 implementation

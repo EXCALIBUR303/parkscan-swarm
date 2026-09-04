@@ -24,17 +24,35 @@ import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 import aiomqtt
 import structlog
-from parkscan_agent.robot import AgentConfig, RobotAgent
+from parkscan_agent.robot import AgentConfig, RobotAgent, TelemetrySample
+from parkscan_perception.geolocation import (
+    DEFAULT_MAX_RANGE_M,
+    CameraIntrinsics,
+    CameraMount,
+    geolocate_detection,
+)
+from parkscan_perception.simulated import SimulatedDetector
 from parkscan_sim.config import SimConfig
 from parkscan_sim.world import SimLite
 
 from parkscan_core.lot import LotSpec, load_lot
 from parkscan_core.types import DataSource, RobotState
 from parkscan_core.world import WorldBackend
-from parkscan_runner.telemetry import progress_payload, telemetry_payload
+from parkscan_runner.perception import (
+    FrameTargets,
+    make_frame,
+    targets_for_frame,
+    visible_targets,
+)
+from parkscan_runner.telemetry import (
+    detection_payload,
+    progress_payload,
+    telemetry_payload,
+)
 
 log = structlog.get_logger(__name__)
 
@@ -56,6 +74,12 @@ class RunnerConfig:
     data_source: DataSource = DataSource.SIMULATED
     robots: int = 1
     zones: tuple[str, ...] = ()
+    detect: bool = True
+    """Run the perception stage. Off makes a pure-navigation run for debugging."""
+    detect_every: int = 4
+    """Camera ticks per N sim steps. At dt=0.05 s, 4 gives 5 Hz — the rate the
+    research budgeted for a CPU-rendered camera, kept here so the message volume
+    matches what a real backend could sustain."""
     start_soc: float | None = None
     """Override the simulator's initial charge. Exists so the return-to-charge and
     docking behaviour can be demonstrated in a short, reproducible run instead of
@@ -88,6 +112,18 @@ class Runner:
         }
         self._assigned: dict[str, str] = {}
 
+        self._intrinsics = CameraIntrinsics()
+        self._mount = CameraMount()
+        # One detector per robot, each seeded from the run seed and the robot's index, so
+        # two robots do not draw an identical noise sequence and the whole run still
+        # reproduces from a single --seed.
+        self._targets = {robot_id: FrameTargets() for robot_id in self._robot_ids}
+        self._detectors = {
+            robot_id: SimulatedDetector(self._targets[robot_id], seed=cfg.seed * 1000 + index)
+            for index, robot_id in enumerate(self._robot_ids)
+        }
+        self._frame_id = 0
+
     @property
     def lot(self) -> LotSpec:
         return self._lot
@@ -102,10 +138,60 @@ class Runner:
             self._assigned[robot_id] = zone_id
             log.info("zone_assigned", robot=robot_id, zone=zone_id)
 
+    async def _perceive(self, client: aiomqtt.Client, samples: Sequence[object]) -> int:
+        """Detect, then geolocate, then publish. Never merged, never reordered.
+
+        The detector is handed an image-space Frame and nothing else. The pose is applied
+        afterwards, by the geolocation stage, so a detection cannot read its own answer
+        out of the map.
+        """
+        potholes = self._backend.potholes() if isinstance(self._backend, SimLite) else ()
+        if not potholes:
+            return 0
+
+        count = 0
+        for sample in samples:
+            telemetry = cast("TelemetrySample", sample)
+            robot_id = telemetry.robot_id
+            pose = telemetry.pose
+
+            visible = visible_targets(
+                potholes,
+                pose,
+                self._intrinsics,
+                self._mount,
+                max_range_m=DEFAULT_MAX_RANGE_M,
+            )
+            self._frame_id += 1
+            frame = make_frame(self._frame_id, telemetry.stamp_ns, robot_id, self._intrinsics)
+            if not visible:
+                continue
+
+            self._targets[robot_id].set(frame.frame_id, targets_for_frame(visible))
+            detector = self._detectors[robot_id]
+            for detection in detector.detect(frame):
+                result = geolocate_detection(detection, pose, self._intrinsics, self._mount)
+                await client.publish(
+                    topic(self._cfg.run_id, robot_id, "detection"),
+                    json.dumps(
+                        detection_payload(
+                            detection,
+                            result,
+                            data_source=self._cfg.data_source,
+                            stamp_ns=telemetry.stamp_ns,
+                            epoch=self._epoch,
+                        )
+                    ).encode(),
+                    qos=1,
+                )
+                count += 1
+        return count
+
     async def run(self) -> int:
         cfg = self._cfg
         dt_s = SimConfig().dt_s
         published = 0
+        detections = 0
         covered: set[str] = set()
 
         async with aiomqtt.Client(hostname=cfg.mqtt_host, port=cfg.mqtt_port) as client:
@@ -133,6 +219,9 @@ class Runner:
                         )
                         published += 1
 
+                if cfg.detect and step_index % cfg.detect_every == 0:
+                    detections += await self._perceive(client, samples)
+
                 for sample in samples:
                     covered.update(sample.covered_cells)
                     progress = progress_payload(sample, epoch=self._epoch)
@@ -154,6 +243,7 @@ class Runner:
                 "runner_finished",
                 steps=step_index + 1,
                 published=published,
+                detections=detections,
                 cells_covered=len(covered),
                 states={r: str(a.state) for r, a in self._agents.items()},
             )

@@ -120,8 +120,11 @@ demo-dock: ## Start near-flat: the robot must decide to return and dock unaided
 
 bench: ## (Phase 4) 30 seeds x 3 strategies -> results.csv
 	@echo "not implemented until Phase 4 — see TASKS.md"; exit 1
-eval:  ## (Phase 3) Geolocation + detector-contract evaluation
-	@echo "not implemented until Phase 3 — see TASKS.md"; exit 1
+eval:  ## Geolocation accuracy vs known truth, binned by range (writes apps/eval/results/)
+	$(PY) -m parkscan_eval.run_eval --seed 42 --out apps/eval/results
+	@echo ""
+	@echo "Every number above is TIER 1 (pipeline). See apps/eval/EVAL.md for what that"
+	@echo "does and does not mean — real-model accuracy is NOT measured here."
 
 .PHONY: lot
 lot: ## Regenerate sim/lot/lot.geojson from the metric lot spec

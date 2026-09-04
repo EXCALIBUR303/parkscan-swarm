@@ -25,10 +25,14 @@ import { create } from 'zustand';
 import { useShallow } from 'zustand/react/shallow';
 
 import { batteryBand, type BatteryBand, type ConnectionStatus, type RobotView } from './lib/robot';
-import type { LiveEvent } from './lib/socket';
+import type { DetectionView, LiveEvent } from './lib/socket';
 import type { DataSource } from './lib/types';
 
 export type { ConnectionStatus, RobotView } from './lib/robot';
+export type { DetectionView } from './lib/socket';
+
+/** Most detections held in memory. See `detections` for why this is bounded. */
+export const MAX_DETECTIONS = 500;
 
 export interface ParkscanState {
   /**
@@ -52,6 +56,14 @@ export interface ParkscanState {
   malformedFrames: number;
   /** Zone id -> coverage fraction 0..1, from `GET /api/v1/coverage`. */
   coverageByZone: Readonly<Record<string, number>>;
+  /**
+   * Detections, newest last, capped at MAX_DETECTIONS.
+   *
+   * A cap rather than unbounded growth: a long run emits thousands, and a dashboard that
+   * degrades over an afternoon is a dashboard nobody leaves open. The cap is stated in
+   * the UI so the list never silently claims to be complete.
+   */
+  detections: readonly DetectionView[];
 
   setDataSource: (dataSource: DataSource) => void;
   setConnection: (connection: ConnectionStatus, error?: string | null) => void;
@@ -60,6 +72,7 @@ export interface ParkscanState {
   /** Apply one animation frame's worth of socket events in a single commit. */
   applyBatch: (batch: readonly LiveEvent[]) => void;
   applyCoverage: (coverageByZone: Readonly<Record<string, number>>) => void;
+  applyDetection: (detection: DetectionView) => void;
   removeRobot: (id: string) => void;
   reset: () => void;
 }
@@ -73,6 +86,7 @@ const INITIAL = {
   droppedFrames: 0,
   malformedFrames: 0,
   coverageByZone: {} as Readonly<Record<string, number>>,
+  detections: [] as readonly DetectionView[],
 };
 
 export const useParkscanStore = create<ParkscanState>()((set) => ({
@@ -102,6 +116,7 @@ export const useParkscanStore = create<ParkscanState>()((set) => ({
       let dropped = state.droppedFrames;
       let malformed = state.malformedFrames;
       let lastError = state.lastError;
+      let detections: DetectionView[] | null = null;
       let touched = false;
 
       for (const event of batch) {
@@ -110,6 +125,11 @@ export const useParkscanStore = create<ParkscanState>()((set) => ({
             robots ??= { ...state.robots };
             robots[event.robot.id] = event.robot;
             dataSource = event.robot.dataSource;
+            touched = true;
+            break;
+          case 'detection':
+            detections ??= [...state.detections];
+            detections.push(event.detection);
             touched = true;
             break;
           case 'run_state':
@@ -140,6 +160,22 @@ export const useParkscanStore = create<ParkscanState>()((set) => ({
         droppedFrames: dropped,
         malformedFrames: malformed,
         lastError,
+        detections:
+          detections === null
+            ? state.detections
+            : detections.length > MAX_DETECTIONS
+              ? detections.slice(-MAX_DETECTIONS)
+              : detections,
+      };
+    });
+  },
+
+  applyDetection: (detection) => {
+    set((state) => {
+      const next = [...state.detections, detection];
+      return {
+        detections: next.length > MAX_DETECTIONS ? next.slice(-MAX_DETECTIONS) : next,
+        dataSource: state.dataSource,
       };
     });
   },
@@ -224,4 +260,19 @@ export function useRobotList(): RobotView[] {
         .filter((r): r is RobotView => r !== undefined),
     ),
   );
+}
+
+/** Detections held in memory, newest last. */
+export function useDetections(): readonly DetectionView[] {
+  return useParkscanStore((s) => s.detections);
+}
+
+/**
+ * Only the detections that have a world position.
+ *
+ * A rejected geolocation has no point (criterion C11), so it is listed in the panel but
+ * never plotted — a pin at a made-up location would be worse than no pin at all.
+ */
+export function usePlottableDetections(): readonly DetectionView[] {
+  return useParkscanStore(useShallow((s) => s.detections.filter((d) => d.position !== null)));
 }
