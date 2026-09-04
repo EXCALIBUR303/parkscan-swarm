@@ -112,6 +112,11 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done & verified · `[!]` blocke
   native arm64, software-rendered (`LIBGL_ALWAYS_SOFTWARE=1`), headless. Well above the
   ~0.3 gate — Phase S is viable as specified, no RoboStack/pixi fallback needed. The
   actual implementation below is not started.
+- [x] **Design review before implementation** (matching Phase 4a's pattern) → [ADR-0008](docs/adr/0008-ros2-backend-bridge-design.md):
+  namespace scheme, the MQTT bridge wire protocol (didn't exist in any doc), lockstep timing
+  via Gazebo's world control service (not wall-clock sleep — the Protocol forbids that), where
+  battery tracking lives, and the seed-reproducibility gap vs. `SimLite` stated explicitly.
+  Nothing built yet.
 - [ ] `ros:jazzy-ros-base` arm64 Dockerfile (`http://packages.ros.org`, `libgl1-mesa-dri`, ogre2)
 - [ ] `rmw_zenoh_cpp` + router; one world, 3 namespaces
 - [ ] `Ros2WorldBackend` implementing the same Protocol; MQTT bridge
