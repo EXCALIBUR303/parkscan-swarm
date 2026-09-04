@@ -73,7 +73,7 @@ so the daemon is optional — though that path is documented rather than exercis
 |---|---|
 | 3 robots divide 12 zones with no duplication | `duplicate_visit_rate = 0.0` across all 90 benchmark runs |
 | Complete coverage | `coverage_pct = 100.0`, minimum across all 90 runs |
-| No collisions | `conflict_count = 0`, maximum across all 90 runs |
+| No collisions | `conflict_count = 0`, maximum across all 90 runs — via sensor-based avoidance, **not** the unwired reservation layer |
 | No robot ever strands | `depletion_events = 0`, total across all 90 runs |
 | Allocation does not thrash | `reassignment_churn = 0.0`, maximum across all 90 runs |
 | An offline robot's work is taken over and **resumed**, not restarted | `apps/runner/tests/test_failure_injection.py` |
@@ -177,6 +177,12 @@ Stated up front, because a portfolio project that hides these is worth less than
   ([ADR-0001](docs/adr/0001-two-simulation-backends.md), [ADR-0002](docs/adr/0002-ros2-jazzy-over-lyrical.md))
   but **has not been built or run**. Until it is, the `WorldBackend` abstraction has one
   implementation and is an unproven claim.
+- **The reservation layer is built but not wired in.** `parkscan_coord.leases` implements
+  atomic acquisition, TTL leases, fencing tokens and an aging FIFO queue, and its tests
+  include an executable no-deadlock invariant — but nothing calls it, and no robot ever
+  enters `WAITING_ON_LEASE`. The zero collisions reported above come from robots seeing each
+  other in their range readings and steering around one another, **not** from reservations.
+  [ADR-0007](docs/adr/0007-coordinator-concurrency.md) says what integration would take.
 - **No physics engine.** 2D kinematics on a flat plane. No dynamics, no wheel slip, no terrain.
 - **The simulated detector does no vision.** It converts known ground-truth geometry into
   detection-shaped records so the pipeline is exercised end to end. It never reads a pixel.
@@ -188,6 +194,7 @@ Stated up front, because a portfolio project that hides these is worth less than
 - **Local dev auth only.** No authentication; the API binds to localhost. Production auth is
   documented, not built.
 - **Single uvicorn worker**, because WebSocket state is in-process. A deliberate MVP boundary.
+- **`/alerts`, `/tasks` and `/reports/run/{id}` are specified but not implemented** — marked as such in the API contract.
 - **CI is written but has never run** — there is no remote.
 - The **no-Docker path** is documented but was not exercised.
 

@@ -72,7 +72,7 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done & verified · `[!]` blocke
 - [x] 3 robots, namespaced; zone allocation, no duplicate work (A6)
 - [x] `allocate()` as a pure function; `greedy` + `hungarian` + `ssi`
 - [x] Property test: `greedy_total >= hungarian_total` over 1000 matrices (C9) + pinned 6.29× regression
-- [x] Lease manager: TTL, renewal, reclaim, **fencing tokens** (C5)
+- [~] Lease manager: TTL, renewal, reclaim, **fencing tokens** (C5) — implemented and unit-tested, but **NOT integrated**: nothing calls it (Phase 6 finding, see ADR-0007)
 - [x] ~~Total resource ordering~~ **atomic per-leg acquisition** (ADR-0007 supersedes: routes acquire lanes out of id order, so the Havender rule would outlaw ordinary routes); FIFO queue + aging
 - [x] Assignment epochs; stale-epoch reports dropped (C6)
 - [x] Failure detection: MQTT LWT + heartbeat deadline + stuck detection (excluding `WAITING_ON_LEASE`)

@@ -1,6 +1,31 @@
 # ADR-0007 — Coordinator concurrency: atomic leg acquisition, not resource ordering
 
-**Status:** Accepted (Phase 4a design review, 2026-09-04) · **Refines:** ADR-0005
+**Status:** Accepted, **implemented but NOT INTEGRATED** (see below) · **Refines:** ADR-0005
+
+> ⚠️ **Integration gap, found by the Phase 6 review.**
+>
+> `parkscan_coord.leases` implements everything below — atomic acquisition, TTL leases,
+> fencing tokens, FIFO queues with aging — and it is covered by its own tests, including the
+> executable no-deadlock invariant and the fencing check driven straight at the resource
+> controller. **But nothing calls it.** `coordinator.py` does not import it, and no robot
+> ever enters `WAITING_ON_LEASE` in a running system.
+>
+> Collisions are currently avoided by a different mechanism entirely: robots appear in each
+> other's range readings and the autonomy's local avoidance layer steers around them. That
+> is what drives `conflict_count = 0` across all 90 benchmark runs — **not** the reservation
+> layer described here.
+>
+> **What integration needs.** Leases were specified assuming the coordinator brokers
+> movement, but the agent owns its own route (`parkscan_agent.lanegraph`), so the coordinator
+> never learns which lane segments a robot is about to traverse. Closing that means either
+> the agent requesting a lease for its next leg before it moves — giving the agent a handle
+> on the coordinator, which the current layering deliberately avoids — or the coordinator
+> tracking each robot's planned route. The charging bays are the tractable subset: there are
+> two for three robots, the coordinator already knows when a robot is returning, and bay
+> contention needs no route knowledge at all.
+>
+> Until then, this ADR describes a design that is built and proven in isolation, not a
+> property of the running fleet, and the README says so.
 
 ## Context
 

@@ -1,5 +1,10 @@
 # API Contract
 
+> **Status.** Rows marked **NOT IMPLEMENTED** are specified but not built. They are left in
+> rather than deleted so the gap between the design and the code is visible, and so nobody
+> reads this file as a description of what exists. Everything unmarked is implemented and
+> covered by tests in `apps/api/tests/`.
+
 Base `/api/v1`. OpenAPI served at `/docs`. All responses include `data_source`.
 Auth: **local dev mode only** for the MVP (no auth, bound to 127.0.0.1); the README documents
 exactly what production auth would add (OAuth2 bearer + per-robot MQTT credentials + TLS).
@@ -14,14 +19,14 @@ That is stated as a known limitation, not implied to be done.
 | `GET` | `/robots` | all robots: state, coordinator_view, battery, pose, zone, epoch |
 | `GET` | `/robots/{id}/telemetry?since=&limit=` | time series page |
 | `GET` | `/zones` | zone polygons, state, `cells_done/cells_total`, assigned robot, epoch |
-| `GET` | `/tasks` | current assignments + history of reassignments with cause |
+| `GET` | `/tasks` | **NOT IMPLEMENTED.** Assignments live in the coordinator's memory and reach the API only as the `zone` row's `assigned_robot_id`; the reassignment history is not persisted |
 | `GET` | `/detections?kind=&severity=&min_confidence=&bbox=&since=` | filtered; `bbox` uses PostGIS |
 | `GET` | `/detections/{id}/evidence` | image crop, or 404 when the backend emitted no frame |
 | `GET` | `/parking-spaces` | occupancy per space + `last_observed_at` |
 | `GET` | `/coverage` | per-zone coverage % + lot total (the choropleth's data source) |
-| `GET` | `/alerts?acknowledged=` | alert feed |
-| `POST` | `/alerts/{id}/ack` | acknowledge |
-| `GET` | `/reports/run/{id}` | the full metric set for one run — what the README's numbers cite |
+| `GET` | `/alerts?acknowledged=` | **NOT IMPLEMENTED.** The `alert` table and its writer exist; no endpoint or UI reads them |
+| `POST` | `/alerts/{id}/ack` | **NOT IMPLEMENTED** |
+| `GET` | `/reports/run/{id}` | **NOT IMPLEMENTED.** Run metrics come from `make bench`, which writes `apps/runner/results/results.csv` directly and does not go through the API |
 
 Errors are RFC 9457 `application/problem+json`.
 
