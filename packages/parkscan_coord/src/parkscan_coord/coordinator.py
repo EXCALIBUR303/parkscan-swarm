@@ -85,12 +85,13 @@ sequence, the coordinator produces the same decisions on every machine.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Final, Protocol
 
-from parkscan_agent.battery_policy import BatteryParams
+from parkscan_agent.battery_policy import BatteryParams, ranked_bays, required_soc
 from parkscan_agent.robot import AgentConfig, RobotAgent, TelemetrySample, planned_cells
 from parkscan_agent.statemachine import Event, is_legal
 
@@ -101,6 +102,7 @@ from parkscan_coord.health import (
     HealthAssessment,
     HealthMonitor,
 )
+from parkscan_coord.leases import Grant, LeaseManager
 from parkscan_coord.metrics import CellVisit, ReassignmentEvent, ZoneCompletion, ZoneOutcome
 from parkscan_core.lot import LotSpec, Zone
 from parkscan_core.types import CoordView, Pose2D, RobotId, RobotState, ZoneState
@@ -347,6 +349,18 @@ class CostFn(Protocol):
     def __call__(self, lot: LotSpec, robot: RobotSnapshot, zone: Zone) -> float: ...
 
 
+#: How long a bay grant lives before it must be renewed. Renewed every tick the holder
+#: is RETURNING or CHARGING (docs/adr/0007), so the exact value barely matters as long as
+#: it comfortably exceeds one ingest cycle; it exists to reclaim a bay from a robot that
+#: stops reporting (the "dead holder" case ADR-0007's lease TTL is for).
+BAY_LEASE_TTL_NS: Final[int] = 10 * NS_PER_S
+
+
+def _bay_resource(bay_id: str) -> str:
+    """The lease resource name for one charging bay."""
+    return f"bay:{bay_id}"
+
+
 @dataclass(frozen=True, slots=True)
 class CoordinatorConfig:
     """The four anti-thrash guards' tuning, in one frozen value."""
@@ -354,6 +368,7 @@ class CoordinatorConfig:
     hysteresis_delta_m: float = HYSTERESIS_DELTA_M
     reassign_cooldown_ns: int = REASSIGN_COOLDOWN_NS
     max_reassignments_per_zone: int = MAX_REASSIGNMENTS_PER_ZONE
+    bay_lease_ttl_ns: int = BAY_LEASE_TTL_NS
 
     def __post_init__(self) -> None:
         if self.hysteresis_delta_m <= 0.0:
@@ -371,6 +386,9 @@ class CoordinatorConfig:
                 "max_reassignments_per_zone must be non-negative, got "
                 f"{self.max_reassignments_per_zone}"
             )
+            raise ValueError(msg)
+        if self.bay_lease_ttl_ns <= 0:
+            msg = f"bay_lease_ttl_ns must be positive, got {self.bay_lease_ttl_ns}"
             raise ValueError(msg)
 
 
@@ -455,6 +473,15 @@ class Coordinator:
             zone.id: _ZoneRecord(zone=zone, cells_total=planned_cells(zone, lot, self._agent_cfg))
             for zone in lot.zones
         }
+        self._bay_leases = LeaseManager()
+        self._targeted_bay: dict[RobotId, str] = {}
+        """Which bay each returning/waiting/charging robot is currently pointed at.
+
+        Tracked independently of the lease grant so :meth:`_manage_bay_lease` can tell
+        "already pursuing this bay, nothing to do" from "just granted a DIFFERENT bay
+        than the one already in flight, must redirect" without reaching into the agent's
+        private state.
+        """
 
         self._views: dict[RobotId, CoordView] = {}
         self._reported: dict[RobotId, RobotState] = {}
@@ -650,6 +677,8 @@ class Coordinator:
         if sample.state is RobotState.IDLE and previous_state is not RobotState.IDLE:
             self._queue(Trigger.ROBOT_AVAILABLE)
 
+        self._manage_bay_lease(sample)
+
         if sample.zone_id is None:
             return IngestResult(accepted=True, reason="telemetry only, no assignment")
 
@@ -734,6 +763,10 @@ class Coordinator:
         if is_legal(agent.state, Event.COMMS_LOST):
             agent.mark_offline("coordinator declared this robot dead")
         agent.recover()
+        # Lazarus abandons the old order outright (module docstring); any bay lease or
+        # queue position from the previous life goes with it, not carried into the fresh
+        # epoch.
+        self._forfeit_bay(robot_id)
 
         self._monitor.clear_offline_latch(robot_id, now_ns)
         self._views[robot_id] = CoordView.ONLINE
@@ -809,6 +842,7 @@ class Coordinator:
         ]
         if is_legal(agent.state, Event.COMMS_LOST):
             agent.mark_offline(assessment.reason)
+        self._forfeit_bay(robot_id)
         decisions.extend(
             self._release(robot_id, now_ns, cause="robot declared offline", detected_ns=now_ns)
         )
@@ -833,11 +867,223 @@ class Coordinator:
         ]
         if is_legal(agent.state, Event.ABORT):
             agent.abort()
+        self._forfeit_bay(robot_id)
         decisions.extend(
             self._release(robot_id, now_ns, cause="robot declared stuck", detected_ns=now_ns)
         )
         self._queue(Trigger.ROBOT_STUCK)
         return tuple(decisions)
+
+    # --------------------------------------------------------------- bay arbitration --
+    def _manage_bay_lease(self, sample: TelemetrySample) -> None:
+        """Arbitrate which robot may approach which charging bay, right now.
+
+        Every robot picks its own nearest bay independently
+        (:func:`~parkscan_agent.battery_policy.nearest_bay`, a pure function of position)
+        with no coordination at all. A Phase 6 review found that this lets two robots
+        converge on the SAME bay and collide during the final approach, where local
+        avoidance is deliberately switched off (docs/adr/0007 -- reproduced there as two
+        robots overlapping by 0.005 m). The state machine already carries the vocabulary
+        arbitration needs -- ``Event.LEASE_DENIED`` / ``Event.BAY_LEASE_GRANTED`` and
+        :meth:`~parkscan_agent.robot.RobotAgent.hold` / ``.resume`` exist specifically for
+        a caller that arbitrates a shared resource -- and this method is that caller.
+
+        Three fixes, layered on top of each other, each found by running the previous one
+        and watching what broke next:
+
+        1. **Arbitration.** At most one robot is ever told to proceed toward a given bay;
+           the :class:`~parkscan_coord.leases.LeaseManager` grant decides who.
+        2. **Physical handoff.** The lease outlives ``CHARGING``. Releasing it the instant
+           the holder reports ``IDLE`` is logically correct and physically wrong -- a
+           robot that finishes charging does not teleport away, it sits exactly where it
+           was until given a new zone. Releasing on ``IDLE`` let the very next waiter be
+           granted a bay whose spur was still physically blocked, and the approaching
+           robot got wedged behind a stationary body it could slow for but never get
+           around, running out ``DockConfig.max_ticks`` and draining to 0% -- a criterion
+           C2 violation, not an inefficiency. So the lease is held until the former
+           occupant is off the working states AND at least
+           ``AgentConfig.dock.approach_radius_m`` from the bay -- the same radius the
+           docking controller itself uses, reused rather than inventing a second one.
+        3. **Try every REACHABLE bay before queueing at all.** Even with (1) and (2), a
+           robot denied its single nearest bay simply queued -- and queueing has NO upper
+           bound: it can take as long as the current holder's entire charge cycle
+           (measured here at roughly 540 s). A robot's own return-trigger
+           (:func:`~parkscan_agent.battery_policy.should_return`) budgets travel, docking
+           and a fixed reserve for the NEAREST bay only, never a wait and never a farther
+           alternative, so a robot that queued for its nearest bay while a FARTHER bay sat
+           completely free could -- and, on this two-bay lot with three robots, reliably
+           did, even from a comfortable 35% starting charge, once two robots happened to
+           return around the same time -- drain to empty waiting for a bay it never needed
+           to wait for. So every bay is tried, nearest first
+           (:func:`~parkscan_agent.battery_policy.ranked_bays`), and only a robot denied
+           every REACHABLE one ever queues.
+
+           Reachable, not merely tried, is the load-bearing word, and it was not in the
+           first version of this fix. Blindly redirecting to whatever bay is free is
+           worse than queueing when that bay is farther than the robot's remaining charge
+           can cover: queueing at least holds position and spends nothing, where a doomed
+           detour actively burns what is left. Measured directly -- a robot with just
+           enough charge for its 12 m nearest bay, redirected on that basis to a 62 m
+           alternate, drained to exactly 0.0 four thousand ticks later having covered
+           under a fifth of the distance. So a bay only counts as a candidate at all if
+           ``sample.battery_soc`` clears
+           :func:`~parkscan_agent.battery_policy.required_soc` for ITS distance, not the
+           nearest one's; a robot with insufficient charge for every bay falls back to
+           trying the nearest anyway, since refusing to act at all helps nothing further.
+
+           A robot the coordinator moves onto a bay other than the one it started toward
+           is redirected via :meth:`~parkscan_agent.robot.RobotAgent.retarget_bay`, which
+           swaps the docking target without touching ``RobotState`` -- the return itself
+           was already decided by the robot; only which bay serves it is this method's
+           business.
+
+        Scope, stated plainly. This still does not wire a
+        :class:`~parkscan_coord.leases.ResourceController` or fencing tokens into the
+        physical docking action, so the "resurrected holder" hazard ADR-0007 already
+        documents remains -- unchanged, only narrower. And with only two bays, a genuine
+        THREE-way simultaneous return still queues one robot with the same no-upper-bound
+        wait (3) describes; trying every bay only helps while at least one is free. That
+        residual is not eliminated, only made much rarer -- two-way contention, the
+        common case demonstrated above, no longer queues at all. Nor does this cover a
+        robot that dies or is declared stuck *while parked at the bay*: forfeiting the
+        lease then (see :meth:`_forfeit_bay`) is unconditional, because a dead robot may
+        never move away to satisfy a clearance check, and refusing to ever reclaim the bay
+        would be worse -- a second robot could still be sent into a spur blocked by a
+        corpse. There is no coordination fix for a robot that cannot move; that is a
+        robotics problem, not an allocation one.
+        """
+        robot_id = sample.robot_id
+        agent = self._agents[robot_id]
+        grant = self._bay_leases.grant_of(robot_id)
+
+        if sample.state not in (
+            RobotState.RETURNING,
+            RobotState.WAITING_ON_LEASE,
+            RobotState.CHARGING,
+        ):
+            # Anything else -- IDLE, FAILED, INSPECTING, TRANSIT, ASSIGNED -- means this
+            # robot is no longer working the bay. But "no longer working it" and "no
+            # longer standing in it" are different facts (fix 2 above), so the lease is
+            # held until the robot has actually put distance behind it.
+            if grant is not None:
+                if self._clear_of_bay(sample.pose, grant):
+                    self._bay_leases.release_all(robot_id)
+                    self._targeted_bay.pop(robot_id, None)
+                else:
+                    self._bay_leases.renew(robot_id, sample.stamp_ns, self._cfg.bay_lease_ttl_ns)
+            return
+
+        if sample.state is RobotState.CHARGING:
+            # Already holds the bay it is sitting in; keep the lease from expiring under
+            # it mid-charge. Renewed every tick rather than TTL-sized to the charge
+            # duration, which this layer has no honest way to predict.
+            if grant is not None:
+                self._bay_leases.renew(robot_id, sample.stamp_ns, self._cfg.bay_lease_ttl_ns)
+            return
+
+        # RETURNING or WAITING_ON_LEASE: heading for, or queued for, a bay.
+        if grant is not None:
+            self._bay_leases.renew(robot_id, sample.stamp_ns, self._cfg.bay_lease_ttl_ns)
+            return
+
+        candidates = ranked_bays(self._lot, sample.pose.x_m, sample.pose.y_m)
+
+        # Reachability, not just distance order. The robot's own return-trigger
+        # (`should_return`) budgets exactly enough charge for the NEAREST bay plus a
+        # fixed margin -- it has no reason to budget for anything farther. Redirecting it
+        # to a farther bay it cannot actually reach on that budget is not a fallback, it
+        # is a worse failure than queueing: queueing at least holds position and spends
+        # nothing, where a doomed detour actively burns the little charge left. Measured
+        # here directly -- a robot with just enough charge for its 12 m nearest bay,
+        # redirected to a 62 m alternate, drained to exactly 0.0 four thousand ticks later
+        # having covered less than a fifth of the distance. So only a bay this robot can
+        # actually finish reaching is ever attempted or redirected to.
+        reachable = [
+            bay
+            for bay in candidates
+            if sample.battery_soc >= required_soc(bay.distance_m, self._battery)
+        ]
+        # A robot with insufficient charge for EVERY bay is already lost regardless of
+        # what this method does; falling back to the full list rather than an empty one
+        # at least tries the nearest option instead of refusing to act at all.
+        targets = reachable if reachable else candidates
+
+        if robot_id not in self._targeted_bay:
+            # First sighting of this return. The robot's OWN `_begin_return` already
+            # picked `nearest_bay` -- exactly `candidates[0]` -- on its own initiative,
+            # before this method ever ran, and by construction it was reachable when
+            # chosen (that is what made `should_return` fire). Seeding the bookkeeping
+            # with that fact, rather than leaving it unset, is what lets the "did the
+            # grant change anything" check below tell a genuine redirect apart from the
+            # ordinary case where the nearest bay was free and the robot is already
+            # correctly pointed at it.
+            self._targeted_bay[robot_id] = candidates[0].bay_id
+
+        for bay in targets:
+            resource = _bay_resource(bay.bay_id)
+            new_grant = self._bay_leases.acquire_all(
+                robot_id, (resource,), sample.stamp_ns, self._cfg.bay_lease_ttl_ns
+            )
+            if new_grant is None:
+                continue
+
+            if self._targeted_bay[robot_id] != bay.bay_id and agent.state in (
+                RobotState.RETURNING,
+                RobotState.WAITING_ON_LEASE,
+            ):
+                agent.retarget_bay(bay.bay_id, sample.pose)
+            self._targeted_bay[robot_id] = bay.bay_id
+
+            if sample.state is RobotState.WAITING_ON_LEASE and is_legal(
+                agent.state, Event.BAY_LEASE_GRANTED
+            ):
+                agent.resume()
+            return
+
+        # Every REACHABLE bay is occupied (or none is reachable at all). Queue for the
+        # nearest of `targets` -- the aging FIFO means this is not a permanent
+        # commitment, and the very next tick re-tries every reachable bay in order again,
+        # so a nearer one freeing up first is taken immediately rather than waited past.
+        nearest = targets[0]
+        if sample.state is RobotState.RETURNING and is_legal(agent.state, Event.LEASE_DENIED):
+            resource = _bay_resource(nearest.bay_id)
+            holder = self._bay_leases.holder(resource)
+            self._targeted_bay[robot_id] = nearest.bay_id
+            agent.hold(f"{resource} held by {holder!r}; queued")
+        # else: already WAITING_ON_LEASE and still denied everywhere -- stay queued.
+
+    def _clear_of_bay(self, pose: Pose2D, grant: Grant) -> bool:
+        """Has the grant's holder put the docking radius behind it, physically?
+
+        ``grant.resources`` carries the resource name (``"bay:<id>"``); the id is looked
+        up against the lot's own charging-bay list rather than trusting anything derived
+        from it, so a malformed resource name fails loudly (a crash) instead of silently
+        treating every bay as vacated.
+        """
+        bay_id = grant.resources[0].removeprefix("bay:")
+        bay = next(b for b in self._lot.charging_bays if b.id == bay_id)
+        distance = math.hypot(pose.x_m - bay.position[0], pose.y_m - bay.position[1])
+        return distance >= self._agent_cfg.dock.approach_radius_m
+
+    def bay_lease_holder(self, bay_id: str) -> RobotId | None:
+        """Which robot currently holds ``bay_id``'s lease, if any. For tests and telemetry."""
+        return self._bay_leases.holder(_bay_resource(bay_id))
+
+    def _forfeit_bay(self, robot_id: RobotId) -> None:
+        """Give up anything ``robot_id`` holds or is queued for.
+
+        Two calls, not one: :meth:`~parkscan_coord.leases.LeaseManager.release_all` only
+        clears a resource the robot actually HOLDS, and a robot merely queued for a bay
+        holds nothing by construction (that is the whole point of ADR-0007's hold-and-wait
+        break). Without also calling
+        :meth:`~parkscan_coord.leases.LeaseManager.cancel_wait` -- which its own
+        docstring says to call exactly here, "when you declare it OFFLINE" -- a robot
+        declared offline, stuck, or Lazarus-recovered while queued would sit in the wait
+        list forever, since ``QueueParams.abandon_after_ns`` is disabled by default.
+        """
+        self._bay_leases.release_all(robot_id)
+        self._bay_leases.cancel_wait(robot_id)
+        self._targeted_bay.pop(robot_id, None)
 
     def _on_reported_state(
         self, record: _ZoneRecord, sample: TelemetrySample

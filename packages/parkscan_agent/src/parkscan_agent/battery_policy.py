@@ -67,13 +67,26 @@ __all__ = [
 class BatteryParams:
     """Battery model and safety policy. Frozen, so a run's policy is a loggable value."""
 
-    soc_per_metre: float = 1.0 / 2500.0
+    soc_per_metre: float = (8.0 + 55.0 * 1.2) / (1.2 * 3600.0 * 20.0)
     """``k``: state of charge consumed per metre driven.
 
-    The default gives a full battery ~2500 m of range, which is about six 124 m zone
-    sweeps plus the transits between them on the shipped 150 x 100 m lot -- enough that a
-    run has to make real return-to-charge decisions rather than never needing one, and
-    little enough that ``make bench`` exercises bay contention with 2 bays and 3 robots.
+    Derived from :class:`parkscan_sim.battery.BatteryParams`'s defaults
+    (``idle_w=8.0``, ``move_w_per_mps=55.0``, ``capacity_wh=20.0``) at
+    :attr:`~parkscan_agent.navigation.NavConfig.max_v_mps`'s default cruise speed of
+    ``1.2`` m/s: ``P(1.2) / (1.2 * 3600 * capacity_wh)``, about ``0.000856``. This is a
+    *hand-derived* match, not an import -- ``battery_policy`` stays decoupled from
+    ``parkscan_sim`` -- so if either module's constants change, this one goes stale
+    silently; there is no test tying them together.
+
+    An earlier value here (``1/2500``) assumed roughly ``2500`` m of cruise-speed range.
+    The simulator's own constants cap that at ``capacity_wh * 3600 / move_w_per_mps ==
+    1309`` m even at infinite speed, and at ``1.2`` m/s -- the speed a return leg
+    actually drives at -- range is ``~1168`` m. The old constant underestimated real
+    travel cost by more than 2x, which :attr:`margin` (25%) cannot absorb: a robot could
+    be cleared to reach a bay it would actually run flat before reaching. ``~1168`` m of
+    range is still about five 124 m zone sweeps plus transits on the shipped 150 x 100 m
+    lot -- enough that a run has to make real return-to-charge decisions, and little
+    enough that ``make bench`` exercises bay contention with 2 bays and 3 robots.
     """
 
     margin: float = 0.25
@@ -146,12 +159,18 @@ class ReturnDecision:
         return self.soc - self.required_soc
 
 
-def nearest_bay(spec: LotSpec, x_m: float, y_m: float) -> BayChoice:
-    """The charging bay with the smallest **lane-graph** distance from ``(x_m, y_m)``.
+def ranked_bays(spec: LotSpec, x_m: float, y_m: float) -> tuple[BayChoice, ...]:
+    """Every charging bay, ranked by **lane-graph** distance from ``(x_m, y_m)``, nearest first.
 
     The pose is snapped onto the graph with :func:`~parkscan_agent.lanegraph.nearest_node`
     first; from there every candidate bay is costed by driving distance. Ties are broken
-    by bay id so the choice is reproducible.
+    by bay id so the ranking is reproducible.
+
+    Exists so a caller that DOES know about contention -- the coordinator, never this
+    robot -- can fall through to the second-nearest bay when the nearest is occupied,
+    rather than queue for it. Queueing has no upper bound on wait time; driving a little
+    farther does. A robot deciding for itself still only ever wants
+    :func:`nearest_bay`: it has no notion of "occupied" to fall through on.
 
     Raises:
         ValueError: the lot declares no charging bays.
@@ -165,7 +184,17 @@ def nearest_bay(spec: LotSpec, x_m: float, y_m: float) -> BayChoice:
         BayChoice(bay_id=bay.id, node=bay.node, distance_m=lane_distance_m(spec, origin, bay.node))
         for bay in sorted(spec.charging_bays, key=lambda b: b.id)
     ]
-    return min(candidates, key=lambda c: (c.distance_m, c.bay_id))
+    return tuple(sorted(candidates, key=lambda c: (c.distance_m, c.bay_id)))
+
+
+def nearest_bay(spec: LotSpec, x_m: float, y_m: float) -> BayChoice:
+    """The charging bay with the smallest **lane-graph** distance from ``(x_m, y_m)``.
+
+    Raises:
+        ValueError: the lot declares no charging bays.
+        ~parkscan_agent.lanegraph.NoRouteError: no bay is reachable from the robot.
+    """
+    return ranked_bays(spec, x_m, y_m)[0]
 
 
 def required_soc(distance_m: float, params: BatteryParams) -> float:

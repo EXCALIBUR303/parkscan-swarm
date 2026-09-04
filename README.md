@@ -73,7 +73,7 @@ so the daemon is optional — though that path is documented rather than exercis
 |---|---|
 | 3 robots divide 12 zones with no duplication | `duplicate_visit_rate = 0.0` across all 90 benchmark runs |
 | Complete coverage | `coverage_pct = 100.0`, minimum across all 90 runs |
-| No collisions | `conflict_count = 0`, maximum across all 90 runs — via sensor-based avoidance, **not** the unwired reservation layer |
+| No collisions | `conflict_count = 0`, maximum across all 90 runs — lane-segment avoidance is sensor-based; bay-approach arbitration is the lease layer (ADR-0007) |
 | No robot ever strands | `depletion_events = 0`, total across all 90 runs |
 | Allocation does not thrash | `reassignment_churn = 0.0`, maximum across all 90 runs |
 | An offline robot's work is taken over and **resumed**, not restarted | `apps/runner/tests/test_failure_injection.py` |
@@ -177,12 +177,20 @@ Stated up front, because a portfolio project that hides these is worth less than
   ([ADR-0001](docs/adr/0001-two-simulation-backends.md), [ADR-0002](docs/adr/0002-ros2-jazzy-over-lyrical.md))
   but **has not been built or run**. Until it is, the `WorldBackend` abstraction has one
   implementation and is an unproven claim.
-- **The reservation layer is built but not wired in.** `parkscan_coord.leases` implements
-  atomic acquisition, TTL leases, fencing tokens and an aging FIFO queue, and its tests
-  include an executable no-deadlock invariant — but nothing calls it, and no robot ever
-  enters `WAITING_ON_LEASE`. The zero collisions reported above come from robots seeing each
-  other in their range readings and steering around one another, **not** from reservations.
-  [ADR-0007](docs/adr/0007-coordinator-concurrency.md) says what integration would take.
+- **The reservation layer is wired in for charging bays, not for lane segments.**
+  `parkscan_coord.leases` implements atomic acquisition, TTL leases, fencing tokens and an
+  aging FIFO queue. `Coordinator._manage_bay_lease` now calls it every tick a robot is
+  returning to, queued for, or occupying a bay, and a robot genuinely enters
+  `WAITING_ON_LEASE` when every reachable bay is taken. The general case — a lease per lane
+  segment a robot is about to drive — remains unintegrated: the agent, not the coordinator,
+  owns its route, so the coordinator has no per-segment reservation to grant. Ordinary
+  driving still avoids collisions the way it always did, by robots seeing each other in
+  their range readings and steering around one another; only the final approach into a bay,
+  where that avoidance is deliberately switched off, is arbitrated by the lease layer.
+  [ADR-0007](docs/adr/0007-coordinator-concurrency.md) has the four fixes integration
+  needed and what is still open (fencing tokens are not wired into the physical docking
+  action; three simultaneous returns on two bays still leaves one robot queueing with no
+  upper time bound).
 - **No physics engine.** 2D kinematics on a flat plane. No dynamics, no wheel slip, no terrain.
 - **The simulated detector does no vision.** It converts known ground-truth geometry into
   detection-shaped records so the pipeline is exercised end to end. It never reads a pixel.

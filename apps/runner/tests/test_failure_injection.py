@@ -140,7 +140,7 @@ def test_the_fleet_still_finishes_every_zone_after_a_robot_is_lost(lot: LotSpec)
     fleet = _Fleet(lot)
     fleet.run(200)
     fleet.silent.add(fleet.ids[0])
-    fleet.run(40_000)
+    fleet.run(80_000)
 
     incomplete = [
         zone.id
@@ -149,6 +149,65 @@ def test_the_fleet_still_finishes_every_zone_after_a_robot_is_lost(lot: LotSpec)
     ]
     assert incomplete == [], f"zones left unfinished after a robot was lost: {incomplete}"
     assert len(fleet.sim.collisions()) == 0, "C1: recovery must not cause a collision"
+
+
+def test_two_robots_returning_at_once_do_not_collide_at_the_bays(lot: LotSpec) -> None:
+    """The bug this integration closes: independent nearest-bay choices used to collide.
+
+    Before ``parkscan_coord.leases.LeaseManager`` was wired into
+    ``Coordinator._manage_bay_lease``, two robots racing home each picked their own
+    nearest bay with no arbitration between them, and avoidance is disabled on the final
+    approach (docking is a precision manoeuvre, not a swerve). Forcing both of the first
+    two robots low at once is the direct reproduction of that race.
+    """
+    fleet = _Fleet(lot)
+    fleet.run(200)
+
+    first, second = fleet.ids[0], fleet.ids[1]
+    fleet.sim.set_battery_soc(first, 0.10)
+    fleet.sim.set_battery_soc(second, 0.10)
+    fleet.run(3000)
+
+    assert len(fleet.sim.collisions()) == 0, "C1: racing for a bay must not collide"
+    assert not fleet.sim.is_depleted(first)
+    assert not fleet.sim.is_depleted(second)
+    assert fleet.agents[first].state in {RobotState.CHARGING, RobotState.IDLE}
+    assert fleet.agents[second].state in {RobotState.CHARGING, RobotState.IDLE}
+
+
+def test_a_returning_robot_takes_the_free_bay_instead_of_queueing_for_the_occupied_one(
+    lot: LotSpec,
+) -> None:
+    """Multi-bay fallback: don't queue for bay A when bay B is sitting empty.
+
+    A zero-slack robot's own feasibility check budgets no time for waiting. Before
+    ``Coordinator._manage_bay_lease`` tried every charge-reachable bay
+    (:func:`parkscan_agent.battery_policy.ranked_bays`) and redirected
+    (:meth:`parkscan_agent.robot.RobotAgent.retarget_bay`) before ever queueing, a robot
+    denied its single nearest bay queued for it regardless of a free second bay, burning
+    down its reserve for nothing.
+    """
+    fleet = _Fleet(lot)
+    fleet.run(200)
+
+    first, second = fleet.ids[0], fleet.ids[1]
+    fleet.sim.set_battery_soc(first, 0.10)
+    fleet.run(1500)
+    assert fleet.agents[first].state is RobotState.CHARGING, "setup: robot 1 should be docked"
+    first_bay = next(
+        bay.id for bay in lot.charging_bays if fleet.coord.bay_lease_holder(bay.id) == first
+    )
+
+    fleet.sim.set_battery_soc(second, 0.08)
+    fleet.run(1500)
+
+    second_bay = next(bay.id for bay in lot.charging_bays if bay.id != first_bay)
+    assert fleet.coord.bay_lease_holder(second_bay) == second, (
+        "robot 2 should have taken the free bay rather than queueing for the occupied one"
+    )
+    assert fleet.agents[second].state in {RobotState.CHARGING, RobotState.IDLE}
+    assert len(fleet.sim.collisions()) == 0
+    assert not fleet.sim.is_depleted(second)
 
 
 def _progress(fleet: _Fleet, robot_id: str) -> bool:

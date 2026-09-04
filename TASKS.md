@@ -72,7 +72,7 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done & verified · `[!]` blocke
 - [x] 3 robots, namespaced; zone allocation, no duplicate work (A6)
 - [x] `allocate()` as a pure function; `greedy` + `hungarian` + `ssi`
 - [x] Property test: `greedy_total >= hungarian_total` over 1000 matrices (C9) + pinned 6.29× regression
-- [~] Lease manager: TTL, renewal, reclaim, **fencing tokens** (C5) — implemented and unit-tested, but **NOT integrated**: nothing calls it (Phase 6 finding, see ADR-0007)
+- [x] Lease manager: TTL, renewal, reclaim, **fencing tokens** (C5) — implemented, unit-tested, and **integrated for charging bays** (`Coordinator._manage_bay_lease`); lane-segment leases remain unintegrated by design scope (Phase 6 finding closed for bays, see ADR-0007)
 - [x] ~~Total resource ordering~~ **atomic per-leg acquisition** (ADR-0007 supersedes: routes acquire lanes out of id order, so the Havender rule would outlaw ordinary routes); FIFO queue + aging
 - [x] Assignment epochs; stale-epoch reports dropped (C6)
 - [x] Failure detection: MQTT LWT + heartbeat deadline + stuck detection (excluding `WAITING_ON_LEASE`)
@@ -100,6 +100,11 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done & verified · `[!]` blocke
 - [ ] Deep review: incomplete paths, races, weak tests, security, setup correctness
 - [ ] Audit every README claim against `results.csv` (A11, H3–H12)
 - [ ] Resume-ready description built **only** from measured results
+- [x] Bay-lease integration (the review's own finding): `Coordinator._manage_bay_lease`
+  now arbitrates, releases only on physical clearance, redirects to a free bay before
+  queueing, and gates redirect on charge feasibility — plus a pre-existing
+  `battery_policy.soc_per_metre` miscalibration (>2x low vs. the simulator's real energy
+  model) found and fixed along the way. See ADR-0007.
 
 ## Phase S — Stretch: `ros2-gz` backend (Sonnet)
 - [ ] **RTF spike first** (see ROADMAP) — that number gates everything below

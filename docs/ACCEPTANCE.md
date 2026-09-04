@@ -22,11 +22,11 @@ The MVP is **not** complete until every box is ticked *and* the evidence command
 
 | # | Criterion |
 |---|---|
-| C1 | `conflict_count == 0` — no two robots overlapping. ⚠️ **Met by sensor-based avoidance, not by reservations:** the lease layer is built but unwired (ADR-0007), so "never two holders of one bay lease" is proven only in `test_leases.py`, not in a running fleet |
+| C1 | `conflict_count == 0` — no two robots overlapping. Lane-segment driving is met by sensor-based avoidance (leases are not integrated at that granularity); bay-approach collisions, where avoidance is deliberately off, are now arbitrated by `Coordinator._manage_bay_lease` calling the lease layer directly, not merely proven in `test_leases.py` in isolation (ADR-0007) |
 | C2 | `depletion_events == 0` — no robot reaches 0% before a bay |
 | C3 | `reassignment_churn == 0.0` in the nominal run — proves hysteresis works |
 | C4 | `coverage_pct == 100.0` in the nominal run |
-| C5 | A stalled robot returning with a **stale fencing token** is rejected by the resource controller — asserted in `test_leases.py` against the controller directly. ⚠️ Unit-level only; the lease layer is not integrated |
+| C5 | A stalled robot returning with a **stale fencing token** is rejected by the resource controller — asserted in `test_leases.py` against the controller directly. ⚠️ Still unit-level only: bay *arbitration* is integrated (ADR-0007), but no `ResourceController` sits in the physical docking path, so a resurrected stale holder is not fenced off in a running fleet |
 | C6 | A progress report with a stale **epoch** is dropped |
 | C7 | The state-machine transition table test covers **all** (state, event) pairs, legal and illegal |
 | C8 | Zones tile the lot with zero gaps and zero overlap |

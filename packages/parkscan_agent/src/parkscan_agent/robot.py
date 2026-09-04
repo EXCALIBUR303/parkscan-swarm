@@ -584,6 +584,44 @@ class RobotAgent:
             f"{decision.bay.distance_m:.1f} m of lane back to {decision.bay.bay_id}"
         )
 
+    def retarget_bay(self, bay_id: str, pose: Pose2D) -> None:
+        """Redirect an in-progress or queued return to a DIFFERENT bay.
+
+        Called by the coordinator when it grants a bay other than the one this robot's
+        own :meth:`_begin_return` picked on its own initiative -- normally because the
+        nearest bay was occupied and a farther one was free. Queueing for one specific
+        bay has no upper bound on wait time; driving a little farther does, which is why
+        the coordinator tries every bay before it ever calls :meth:`hold` for this
+        resource (see :mod:`parkscan_coord.coordinator`).
+
+        This does not change ``state`` and is not routed through the state machine: it
+        redirects an ALREADY-DECIDED return (``RETURNING`` or ``WAITING_ON_LEASE``), it
+        never starts or ends one -- those stay exactly where they always were,
+        :meth:`_begin_return` and the state machine respectively.
+
+        ``pose`` is the caller's own telemetry pose for this tick, passed in rather than
+        re-sensed, matching how :meth:`tick` hands :meth:`_begin_return` the frame it
+        already has instead of asking the backend again.
+
+        Raises:
+            ValueError: called while not ``RETURNING`` or ``WAITING_ON_LEASE`` -- a
+                misuse this method reports rather than silently ignores, symmetric with
+                how :meth:`hold` and :meth:`resume` raise through the state machine for
+                the same kind of mistake. The caller is expected to check first, as it
+                already must before calling those.
+        """
+        if self._state not in (RobotState.RETURNING, RobotState.WAITING_ON_LEASE):
+            msg = (
+                f"cannot retarget a bay from {self._state.value!r}; only legal from "
+                "RETURNING or WAITING_ON_LEASE"
+            )
+            raise ValueError(msg)
+        bay = next(b for b in self._lot.charging_bays if b.id == bay_id)
+        controller = DockController(bay, self._lot, self._cfg.nav, self._cfg.dock)
+        controller.start(pose)
+        self._dock = controller
+        self._detail = f"redirected to {bay_id}"
+
     def _release_assignment(self, reason: str) -> None:
         """Stash progress and drop the order. The coordinator requeues the remainder."""
         current = self.progress

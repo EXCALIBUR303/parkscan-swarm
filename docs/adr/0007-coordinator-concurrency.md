@@ -1,31 +1,63 @@
 # ADR-0007 — Coordinator concurrency: atomic leg acquisition, not resource ordering
 
-**Status:** Accepted, **implemented but NOT INTEGRATED** (see below) · **Refines:** ADR-0005
+**Status:** Accepted, **implemented and integrated for charging bays** (see below) ·
+**Refines:** ADR-0005
 
-> ⚠️ **Integration gap, found by the Phase 6 review.**
+> ✅ **Integration gap, found by the Phase 6 review — now closed for bays.**
 >
-> `parkscan_coord.leases` implements everything below — atomic acquisition, TTL leases,
-> fencing tokens, FIFO queues with aging — and it is covered by its own tests, including the
-> executable no-deadlock invariant and the fencing check driven straight at the resource
-> controller. **But nothing calls it.** `coordinator.py` does not import it, and no robot
-> ever enters `WAITING_ON_LEASE` in a running system.
+> `parkscan_coord.leases` implements atomic acquisition, TTL leases, fencing tokens, and
+> FIFO queues with aging, and is covered by its own tests, including the executable
+> no-deadlock invariant and the fencing check driven straight at the resource controller.
+> The Phase 6 review found that none of it was wired up: `coordinator.py` did not import
+> it, and no robot ever entered `WAITING_ON_LEASE` in a running system. Collisions were
+> avoided by a different mechanism entirely — local avoidance steering robots around each
+> other — which is not a substitute for arbitrating who gets a bay.
 >
-> Collisions are currently avoided by a different mechanism entirely: robots appear in each
-> other's range readings and the autonomy's local avoidance layer steers around them. That
-> is what drives `conflict_count = 0` across all 90 benchmark runs — **not** the reservation
-> layer described here.
+> **What integration needed**, and what it turned out to need in practice, differed from
+> the plan below in one respect: lane-segment leases (the general case, agent-owned
+> routing) remain unintegrated, exactly as scoped — closing that still means either the
+> agent requesting a lease for its next leg before it moves, or the coordinator tracking
+> each robot's planned route, and neither has been done. **Bay leases are integrated.**
+> `Coordinator._manage_bay_lease` now calls `LeaseManager.acquire_all` every tick a robot
+> is `RETURNING`, `WAITING_ON_LEASE`, or `CHARGING`, and a robot genuinely enters
+> `WAITING_ON_LEASE` when every reachable bay is taken.
 >
-> **What integration needs.** Leases were specified assuming the coordinator brokers
-> movement, but the agent owns its own route (`parkscan_agent.lanegraph`), so the coordinator
-> never learns which lane segments a robot is about to traverse. Closing that means either
-> the agent requesting a lease for its next leg before it moves — giving the agent a handle
-> on the coordinator, which the current layering deliberately avoids — or the coordinator
-> tracking each robot's planned route. The charging bays are the tractable subset: there are
-> two for three robots, the coordinator already knows when a robot is returning, and bay
-> contention needs no route knowledge at all.
+> Getting bay leases correctly wired up took four layered fixes, not one call site:
 >
-> Until then, this ADR describes a design that is built and proven in isolation, not a
-> property of the running fleet, and the README says so.
+> 1. **Arbitration.** Two robots picking the same nearest bay independently used to
+>    collide on final approach, where avoidance is deliberately off (docking is a
+>    precision manoeuvre, not a swerve). `acquire_all` now grants the bay to exactly one
+>    robot; every other robot calls `agent.hold(...)` and waits for
+>    `Event.BAY_LEASE_GRANTED`.
+> 2. **Physical handoff, not just logical release.** Releasing a bay's lease the instant
+>    its holder reports `IDLE` let the next robot be granted a bay whose spur was still
+>    physically blocked by the (logically vacated, physically stationary) previous
+>    holder — it got wedged and timed out. `_clear_of_bay` now withholds release until the
+>    former holder has put `AgentConfig.dock.approach_radius_m` behind it.
+> 3. **Multi-bay fallback before queueing.** A robot denied its nearest bay used to queue
+>    with no upper bound on wait time, even with a second, empty bay sitting idle — fatal,
+>    since the robot's own return-to-charge decision budgets zero slack for waiting, and
+>    idle draw keeps consuming charge while queued. `ranked_bays` plus
+>    `RobotAgent.retarget_bay` now try every bay, nearest first, before ever queueing.
+> 4. **Feasibility-gated redirect.** Fix 3 alone could redirect a robot to a farther bay
+>    it could not actually reach on remaining charge — worse than queueing, since a doomed
+>    drive burns exactly the charge that holding position would have conserved. Candidates
+>    are now filtered to `battery_soc >= required_soc(bay.distance_m, ...)` before
+>    `acquire_all` is even attempted; only if *no* bay is charge-feasible does the
+>    fallback try the full ranked list anyway (refusing to act at all helps nothing
+>    further at that point).
+>
+> Fix 4 surfaced a **separate, pre-existing bug** in
+> `parkscan_agent.battery_policy.BatteryParams.soc_per_metre`: the constant (`1/2500`)
+> underestimated real travel cost by more than 2x against the simulator's own
+> `idle_w`/`move_w_per_mps`/`capacity_wh` at the actual cruise speed (`NavConfig.max_v_mps
+> == 1.2`), so `required_soc` could clear a robot for a bay it would run flat before
+> reaching — the 25% margin cannot absorb a 2x error. It predates this integration and
+> affected every return-to-charge decision project-wide, not only bay redirects; it was
+> only exposed here because redirect sends robots on longer, multi-turn routes that push
+> closer to the model's edge. Fixed by deriving the constant from the simulator's real
+> constants instead of an unmeasured guess (see the field's docstring in
+> `battery_policy.py`).
 
 ## Context
 
@@ -108,3 +140,16 @@ means something when they are — a controller colocated with the granter can al
 "corrected" by it. The fencing test must therefore drive the resource controller
 **directly** with a stale token, never through the granter, or it proves nothing. Noted in
 the test itself.
+
+Fencing tokens are also not wired into the physical docking action for bays: a "resurrected
+holder" — one that stalls past its TTL, gets its lease reclaimed and reassigned, then
+resumes — is not fenced off from the bay it no longer legitimately holds. This was already
+a documented ADR-0007 gap before the bay-lease integration and the integration does not
+close it; closing it needs a `ResourceController` in the docking path, which does not exist
+yet.
+
+A genuine three-way simultaneous return on a two-bay lot still leaves one robot with no
+upper bound on wait time — fix 3 above (multi-bay fallback) has nowhere left to redirect to
+once every bay is taken. This is accepted as a narrow, load-bearing limitation rather than
+engineered against further: with 2 bays and 3 robots, "bay contention has to be real" (see
+Consequences, above) means some contention is by design, not a bug to eliminate.

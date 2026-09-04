@@ -291,7 +291,7 @@ def test_no_strategy_picks_a_battery_infeasible_pair(
     asserts that first, because a mask that was all-``True`` would make the real
     assertion pass without exercising anything.
     """
-    robots = fleet(soc=0.20)
+    robots = fleet(soc=0.40)
     zones = list(lot.zones)
     model = build_cost_model(lot, robots, zones, params)
     assert bool(np.any(~model.feasible)), "fixture no longer produces infeasible pairs"
