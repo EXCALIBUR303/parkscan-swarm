@@ -40,7 +40,10 @@ and reported the null result as null.
   exposed that robots were invisible to one another's sensors; a design review found that the
   textbook resource-ordering rule for deadlock could not be used, because measured routes
   acquire lane segments out of id order; a final audit found a fully-tested reservation layer
-  that nothing called.
+  that nothing called, and integrating it surfaced a second, unrelated bug — a battery model
+  that had been underestimating real travel cost by more than 2x since Phase 2, silently
+  passing every benchmark because natural runs never got close enough to the margin to expose
+  it.
 - **Made honesty structural.** Provenance is a `NOT NULL` column, so the dashboard's
   SIMULATED badge renders from data rather than a hardcoded string; geolocation *rejects*
   rays above the horizon rather than clamping them to a plausible wrong point; and the
@@ -52,11 +55,16 @@ and reported the null result as null.
 
 Volunteer these; each is documented in the README's Limitations section.
 
-- **It is not a ROS 2 system.** The second backend is designed and specified but never built,
-  so the adapter has one implementation and is an unproven abstraction.
-- **The reservation layer is not integrated.** Leases, fencing tokens and the aging queue are
-  implemented and unit-tested, but nothing calls them — the zero collisions come from
-  sensor-based avoidance instead. ADR-0007 records exactly what integration would take.
+- **It is not a ROS 2 system, yet.** The second backend's gating spike (real-time factor) has
+  passed on this host (~1.0), and ADR-0008 designs the bridge it needs, but it is not built —
+  the adapter still has one running implementation.
+- **The reservation layer is integrated for charging bays, not for lane segments.** Leases,
+  fencing tokens and the aging queue are implemented, unit-tested, and now called by
+  `Coordinator._manage_bay_lease` for bay arbitration — the general per-lane-segment case
+  remains unintegrated by design scope (the agent, not the coordinator, owns its route).
+  Ordinary driving still avoids collisions via sensor-based avoidance; only the final approach
+  into a bay, where that avoidance is off, is arbitrated by the lease layer. ADR-0007 has the
+  four fixes integration needed and what is still open.
 - **The detector reads no pixels.** It turns known ground-truth geometry into
   detection-shaped records, so every perception number measures the pipeline and none of them
   says anything about real-world detection accuracy.
@@ -65,6 +73,6 @@ Volunteer these; each is documented in the README's Limitations section.
 
 ## Scale
 
-185 files · ~13k lines of Python and TypeScript · 767 Python + 74 web tests · ruff, mypy
-`--strict` and TypeScript strict clean across the repo · 7 architecture decision records,
+186 files · ~13k lines of Python and TypeScript · 769 Python + 74 web tests · ruff, mypy
+`--strict` and TypeScript strict clean across the repo · 8 architecture decision records,
 including two that record what was rejected and why.
