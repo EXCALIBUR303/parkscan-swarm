@@ -114,13 +114,31 @@ These two topics use **QoS 1**, deliberately different from `state`/`cmd`'s QoS 
 step or reset ack would hang `Ros2WorldBackend` in a blocking wait forever, where a lost `state`
 sample is just superseded by the next one a few milliseconds later.
 
-**Still an open, implementation-time question, not resolved here:** whether `multi_step`'s
-response genuinely blocks until physics has advanced (making the bridge's own call synchronous,
-which this design assumes) or is acknowledged optimistically before the steps complete. The RTF
-spike confirmed the service *exists and is being served*; it did not exercise `multi_step`
-specifically. Verify this empirically before trusting the lockstep guarantee — the RTF spike's
-own two undocumented bugs (found only by running it, not by reading Gazebo's docs) are the
-reason this is flagged rather than assumed.
+**Confirmed empirically, before writing the bridge — and the answer to the question this
+section originally left open.** Two facts, verified directly against a running `gz sim` inside
+the container, neither of which is documented anywhere obvious:
+
+1. `multi_step` alone does **not** step-then-repause. Sent by itself, the world advances a few
+   iterations and then keeps running freely (observed: 474 iterations and 23.7 s of sim time,
+   nearly a real *minute*'s worth, after a single `multi_step: 20` call with nothing else) —
+   it behaves as an unpause, not a bounded step. The request must carry **both**
+   `multi_step: N` *and* `pause: true` in the same `WorldControl` message. With both set, the
+   world executes exactly `N` iterations and then genuinely returns to `paused: true` —
+   verified by polling `stats` after the fact and seeing `iterations` land exactly on `N`.
+2. The service's `gz.msgs.Boolean{data: true}` reply is an **accept, not a completion
+   signal**. It returns almost immediately; the requested iterations are still being applied
+   afterward, taking roughly `N * step_size` of real wall-clock time to actually finish
+   (consistent with RTF ≈ 1.0). A bridge that treats the reply alone as "the step is done" and
+   immediately reports `step_ack` would be racing ahead of physics.
+
+**This changes the bridge's implementation, not the design's shape:** §6's `control/step`
+handler must call `/world/<name>/control` with `{multi_step: N, pause: true}`, then poll (or
+subscribe to) `/world/<name>/stats` until `iterations` has advanced by exactly `N` from where it
+started, and only then publish `step_ack`. The MQTT-relay design and the QoS-1 choice (a lost
+ack hangs forever) are unaffected — this just says precisely what "the bridge's local call has
+actually returned" (§6's wording) must mean in code. Found by running it, the same way the RTF
+spike's own two undocumented bugs were found — not by reading Gazebo's docs, which say none of
+this.
 
 ### 4. Battery: reuse the pure proxy, own it in `Ros2WorldBackend`, propose relocating it
 
@@ -221,17 +239,15 @@ TASKS.md's verify step means *them*, not the runner's own bootstrap code.
   MQTT messages, a stalled Gazebo world, a lidar plugin misconfigured relative to
   `SensorParams`) that `SimLite` simply does not have. None of this is covered by the existing
   `packages/parkscan_sim` test suite, and needs its own.
-- ⚠️ This ADR does not resolve, and does not attempt to resolve, whether the lidar/camera sensor
-  plugins available in `ros_gz_sim` for Jazzy actually support the exact ray count/FOV
-  `SensorParams` specifies, or whether `multi_step`'s response genuinely blocks until physics has
-  advanced rather than acknowledging optimistically (§3's still-open question — this is a
-  `gz-transport` question, not an `rmw_zenoh_cpp` one; the control call never touches ROS 2's
-  middleware at all, only the bridge's local, same-container `gz-transport` connection). Both are
-  implementation-time discoveries, not design decisions — flagged here so they are looked for
-  deliberately rather than found by surprise, the way the RTF spike's own command had two
-  undocumented bugs (missing `setup.bash` sourcing, `-v 4` not actually reporting RTF) that only
-  surfaced by
-  running it.
+- ✅ Both things this bullet originally flagged as open have since been verified directly
+  against a running `gz sim` in the container, before the bridge was written: the SDF's
+  `gpu_lidar` sensor plugin (37 rays, 1.5π FOV, 12 m range — `SensorParams`'s exact defaults)
+  loads and advertises cleanly per robot with zero errors, and `multi_step`'s true semantics
+  are now pinned down in §3 (must pair with `pause: true`; the reply is an accept, not
+  completion). Neither was documented anywhere; both were found by loading a real SDF and
+  calling the real service, not by reading Gazebo's docs, the way the RTF spike's own two
+  undocumented bugs (missing `setup.bash` sourcing, `-v 4` not actually reporting RTF) were
+  found only by running it.
 
 ## What this ADR does not do
 
