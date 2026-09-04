@@ -142,14 +142,27 @@ def run_once(lot: LotSpec, seed: int, strategy: Strategy) -> RunResult:
 
 
 def _git_sha() -> str:
+    """The commit these results came from, marked DIRTY if the tree was not clean.
+
+    A bare SHA on results produced from a modified tree is worse than no SHA: it names a
+    commit that does not contain the code that ran. Acceptance criterion A11 requires every
+    published metric to be traceable, and traceable means the identifier has to be honest
+    about when it cannot identify anything.
+    """
     try:
-        out = subprocess.run(
+        sha = subprocess.run(
             ["git", "rev-parse", "--short=12", "HEAD"],
             capture_output=True,
             text=True,
             check=True,
-        )
-        return out.stdout.strip()
+        ).stdout.strip()
+        dirty = subprocess.run(
+            ["git", "status", "--porcelain"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        return f"{sha}-DIRTY" if dirty else sha
     except (OSError, subprocess.CalledProcessError):  # pragma: no cover - not in a repo
         return "unknown"
 
