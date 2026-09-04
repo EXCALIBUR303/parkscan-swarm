@@ -173,10 +173,14 @@ ordinary routes — and the design switched to atomic per-leg acquisition; and
 Stated up front, because a portfolio project that hides these is worth less than one that names them.
 
 - **This is not a ROS 2 system.** ROS 2 does not support macOS on arm64, so the default backend
-  is a purpose-built deterministic simulator. The `ros2-gz` backend is designed and specified
-  ([ADR-0001](docs/adr/0001-two-simulation-backends.md), [ADR-0002](docs/adr/0002-ros2-jazzy-over-lyrical.md))
-  but **has not been built or run**. Until it is, the `WorldBackend` abstraction has one
-  implementation and is an unproven claim.
+  is a purpose-built deterministic simulator. The `ros2-gz` backend's gating RTF spike has passed
+  (~1.0, [ROADMAP](docs/ROADMAP.md)) and its design ([ADR-0001](docs/adr/0001-two-simulation-backends.md),
+  [ADR-0002](docs/adr/0002-ros2-jazzy-over-lyrical.md), [ADR-0008](docs/adr/0008-ros2-backend-bridge-design.md))
+  has been verified against a real Gazebo Sim Server and `ros_gz_bridge` — a world SDF generator
+  and a Gazebo lockstep control wrapper exist and are unit-tested (`packages/parkscan_ros2`) —
+  but **`Ros2WorldBackend` itself does not exist yet**, stopped deliberately at that checkpoint.
+  Until it does, the `WorldBackend` abstraction has one running implementation and is an
+  unproven claim.
 - **The reservation layer is wired in for charging bays, not for lane segments.**
   `parkscan_coord.leases` implements atomic acquisition, TTL leases, fencing tokens and an
   aging FIFO queue. `Coordinator._manage_bay_lease` now calls it every tick a robot is

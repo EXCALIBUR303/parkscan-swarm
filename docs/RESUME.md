@@ -56,8 +56,10 @@ and reported the null result as null.
 Volunteer these; each is documented in the README's Limitations section.
 
 - **It is not a ROS 2 system, yet.** The second backend's gating spike (real-time factor) has
-  passed on this host (~1.0), and ADR-0008 designs the bridge it needs, but it is not built —
-  the adapter still has one running implementation.
+  passed on this host (~1.0); ADR-0008 designs the bridge it needs and that design has been
+  verified against a real Gazebo Sim Server and `ros_gz_bridge` (a world SDF generator and a
+  Gazebo control wrapper exist, unit-tested), but `Ros2WorldBackend` itself is not built — the
+  adapter still has one running implementation.
 - **The reservation layer is integrated for charging bays, not for lane segments.** Leases,
   fencing tokens and the aging queue are implemented, unit-tested, and now called by
   `Coordinator._manage_bay_lease` for bay arbitration — the general per-lane-segment case
@@ -73,6 +75,6 @@ Volunteer these; each is documented in the README's Limitations section.
 
 ## Scale
 
-186 files · ~13k lines of Python and TypeScript · 769 Python + 74 web tests · ruff, mypy
+195 files · ~13k lines of Python and TypeScript · 787 Python + 74 web tests · ruff, mypy
 `--strict` and TypeScript strict clean across the repo · 8 architecture decision records,
 including two that record what was rejected and why.

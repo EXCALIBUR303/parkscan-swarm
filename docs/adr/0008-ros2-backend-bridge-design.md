@@ -1,7 +1,10 @@
 # ADR-0008 — `Ros2WorldBackend`: namespace scheme, lockstep timing, and the MQTT bridge
 
-**Status:** Proposed, not implemented · **Extends:** ADR-0001, ADR-0002 · **Gated by:** the RTF
-spike in `docs/ROADMAP.md` (passed, RTF ≈ 1.0)
+**Status:** Proposed, design verified against a real Gazebo + `ros_gz_bridge`, foundation built
+(`packages/parkscan_ros2`'s SDF generator and `GzControl`) — **`Ros2WorldBackend` itself and the
+bridge's MQTT relay are not implemented; stopped here deliberately at a checkpoint (see
+TASKS.md's Phase S entry for 2026-09-05)** · **Extends:** ADR-0001, ADR-0002 · **Gated by:** the
+RTF spike in `docs/ROADMAP.md` (passed, RTF ≈ 1.0)
 
 ## Context
 
@@ -244,6 +247,30 @@ TASKS.md's verify step means *them*, not the runner's own bootstrap code.
   ros2 up`), never a change to the default `db`/`mqtt` services or to the documented rule that
   `make dev` works with Docker down entirely for the `sim-lite` path.
 
+## A scope note on `rmw_zenoh_cpp`, found while verifying the rest
+
+All verification in this ADR (the bridge, the odometry warm-up quirk, the `multi_step` pairing)
+was run via `docker exec` **inside a single container**, on whatever RMW ships default with
+`ros:jazzy-ros-base` — `rmw_zenoh_cpp` was never installed, configured, or exercised. This
+matters beyond "one more thing not yet tested": on reflection, the MQTT-relay design this whole
+ADR describes may make ADR-0002's zenoh requirement **moot for this specific architecture**.
+Zenoh-over-DDS-multicast was chosen because *something* needed to carry ROS 2 traffic across the
+Docker Desktop VM boundary. But my own bridge (§6) exists precisely so that nothing does: the
+rclpy bridge and `ros_gz_bridge` both live inside the same container, talking ROS 2 to each
+other over a plain same-network-namespace connection no different from any other same-host ROS 2
+setup, and everything that crosses the actual host/container boundary goes over MQTT, already
+proven to cross it. Whichever RMW the container's ROS 2 nodes use for *purely internal*
+same-container topics should not need zenoh's cross-boundary router at all.
+
+This is not a reason to skip it. TASKS.md lists zenoh as a Phase S goal in its own right — proving
+out ADR-0002's actual decision, not merely a means to an end — and this project's own principle
+(stated plainly elsewhere: *"an adapter with one implementation is an unproven claim"*) argues
+for actually configuring and exercising it rather than declaring it unnecessary from first
+principles and never checking. Flagged here so whoever implements this either (a) wires zenoh
+anyway and confirms it works exactly as ADR-0002 specified, or (b) makes a deliberate, stated
+call to skip it because this design doesn't need it — never lets "verified against a real
+Gazebo" quietly stand in for "verified with the RMW this project actually chose."
+
 ## Consequences
 
 - ✅ `WorldBackend`'s six methods stay exactly as specified in `parkscan_core/world.py` — no
@@ -271,9 +298,17 @@ TASKS.md's verify step means *them*, not the runner's own bootstrap code.
   undocumented bugs (missing `setup.bash` sourcing, `-v 4` not actually reporting RTF) were
   found only by running it.
 
-## What this ADR does not do
+## What was actually built, and what still is not
 
-It does not write the `.sdf` file, the bridge node, `Ros2WorldBackend`, the `ros_gz_bridge`
-YAML, the Zenoh router config, or the Compose service. It is the design those should be built
-against — matching the project's own pattern of a design review preceding implementation for
-every phase complex enough to warrant one.
+Updated after the fact: verifying this design against a real Gazebo turned into writing real,
+tested code, not just checking assumptions. Built and committed: the `.sdf` generator
+(`parkscan_ros2/sdf.py`) and the Gazebo lockstep control wrapper (`parkscan_ros2/bridge/gz_control.py`),
+both unit-tested and both exercised against a real `gz sim` + `ros_gz_bridge` in a manually
+provisioned dev container. **Not built**, and this is where implementation deliberately stopped:
+the bridge node's actual MQTT relay logic (§6's wire protocol — `GzControl` handles the Gazebo
+side of `control/step`/`control/reset` but nothing publishes `state` or subscribes `cmd` yet),
+`Ros2WorldBackend` itself, the `ros:jazzy-ros-base` Dockerfile, any Zenoh router configuration
+(see the scope note above), and the `docker-compose` service. This ADR remains the design those
+should be built against — matching the project's own pattern of a design review preceding
+implementation for every phase complex enough to warrant one — but "reviewed" here also means
+"partially built and load-tested," not only "written down."
