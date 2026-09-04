@@ -1,0 +1,76 @@
+{
+  "git_sha": "0d2e57d2b8d1",
+  "seeds": 30,
+  "strategies": [
+    "greedy",
+    "hungarian",
+    "ssi"
+  ],
+  "comparisons": [
+    {
+      "baseline": "greedy",
+      "challenger": "hungarian",
+      "metric": "makespan_s",
+      "median_difference": 0.0,
+      "ci_low": -10.550000000000011,
+      "ci_high": 21.25,
+      "wins": 10,
+      "losses": 13,
+      "ties": 7,
+      "n_pairs": 30,
+      "significant": false,
+      "summary": "makespan_s: greedy vs hungarian, median difference +0 (95% CI -10.55 to +21.25, 10/30 wins, 13 losses, 7 ties, lower is better), not significant at this fleet size (n=30 paired seeds, 10000 bootstrap resamples, seed=0)"
+    },
+    {
+      "baseline": "greedy",
+      "challenger": "hungarian",
+      "metric": "total_distance_m",
+      "median_difference": 0.04821387759909612,
+      "ci_low": 0.029310925195204618,
+      "ci_high": 0.0645166820763734,
+      "wins": 4,
+      "losses": 26,
+      "ties": 0,
+      "n_pairs": 30,
+      "significant": true,
+      "summary": "total_distance_m: greedy vs hungarian, median difference +0.04821 (95% CI +0.02931 to +0.06452, 4/30 wins, 26 losses, 0 ties, lower is better), significant at this fleet size (n=30 paired seeds, 10000 bootstrap resamples, seed=0)"
+    },
+    {
+      "baseline": "greedy",
+      "challenger": "ssi",
+      "metric": "makespan_s",
+      "median_difference": 68.60000000000002,
+      "ci_low": 47.5750000000001,
+      "ci_high": 68.65000000000003,
+      "wins": 1,
+      "losses": 29,
+      "ties": 0,
+      "n_pairs": 30,
+      "significant": true,
+      "summary": "makespan_s: greedy vs ssi, median difference +68.6 (95% CI +47.58 to +68.65, 1/30 wins, 29 losses, 0 ties, lower is better), significant at this fleet size (n=30 paired seeds, 10000 bootstrap resamples, seed=0)"
+    },
+    {
+      "baseline": "greedy",
+      "challenger": "ssi",
+      "metric": "total_distance_m",
+      "median_difference": 146.16647231116747,
+      "ci_low": 146.1402237285945,
+      "ci_high": 146.18678161741423,
+      "wins": 0,
+      "losses": 30,
+      "ties": 0,
+      "n_pairs": 30,
+      "significant": true,
+      "summary": "total_distance_m: greedy vs ssi, median difference +146.2 (95% CI +146.1 to +146.2, 0/30 wins, 30 losses, 0 ties, lower is better), significant at this fleet size (n=30 paired seeds, 10000 bootstrap resamples, seed=0)"
+    }
+  ],
+  "correctness": {
+    "runs": 90,
+    "all_completed": true,
+    "max_conflict_count": 0,
+    "total_depletion_events": 0,
+    "min_coverage_pct": 100.0,
+    "max_duplicate_visit_rate": 0.0,
+    "max_reassignment_churn": 0.0
+  }
+}

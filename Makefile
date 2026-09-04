@@ -118,8 +118,11 @@ demo-watch: ## Same run throttled to real time, so the dashboard is watchable
 demo-dock: ## Start near-flat: the robot must decide to return and dock unaided
 	$(PY) -m parkscan_runner.run --seed 42 --robots 1 --zones zone_09 --start-soc 0.08
 
-bench: ## (Phase 4) 30 seeds x 3 strategies -> results.csv
-	@echo "not implemented until Phase 4 — see TASKS.md"; exit 1
+bench: ## 30 seeds x 3 strategies -> apps/runner/results/{results.csv,results.json}
+	$(PY) -m parkscan_runner.bench --seeds 30 --out apps/runner/results
+	@echo ""
+	@echo "Every metric in the README must be traceable to a row of results.csv, which is"
+	@echo "committed. Re-run this and diff it to check any claim."
 eval:  ## Geolocation accuracy vs known truth, binned by range (writes apps/eval/results/)
 	$(PY) -m parkscan_eval.run_eval --seed 42 --out apps/eval/results
 	@echo ""

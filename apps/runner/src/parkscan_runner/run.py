@@ -29,6 +29,8 @@ from typing import cast
 import aiomqtt
 import structlog
 from parkscan_agent.robot import AgentConfig, RobotAgent, TelemetrySample
+from parkscan_coord.allocation import Strategy
+from parkscan_coord.coordinator import Coordinator, CoordinatorConfig
 from parkscan_perception.geolocation import (
     DEFAULT_MAX_RANGE_M,
     CameraIntrinsics,
@@ -42,6 +44,7 @@ from parkscan_sim.world import SimLite
 from parkscan_core.lot import LotSpec, load_lot
 from parkscan_core.types import DataSource, RobotState
 from parkscan_core.world import WorldBackend
+from parkscan_runner.fleet import StrategyAllocator
 from parkscan_runner.perception import (
     FrameTargets,
     make_frame,
@@ -80,6 +83,9 @@ class RunnerConfig:
     """Camera ticks per N sim steps. At dt=0.05 s, 4 gives 5 Hz — the rate the
     research budgeted for a CPU-rendered camera, kept here so the message volume
     matches what a real backend could sustain."""
+    strategy: Strategy = Strategy.GREEDY
+    """Allocation strategy. The coordinator owns recovery either way; only the choice of
+    who gets which zone changes, which is what makes the 30-seed comparison fair."""
     start_soc: float | None = None
     """Override the simulator's initial charge. Exists so the return-to-charge and
     docking behaviour can be demonstrated in a short, reproducible run instead of
@@ -110,7 +116,12 @@ class Runner:
             robot_id: RobotAgent(robot_id, self._lot, self._backend, AgentConfig())
             for robot_id in self._robot_ids
         }
-        self._assigned: dict[str, str] = {}
+        self._coord = Coordinator(
+            self._lot,
+            self._agents,
+            allocator=StrategyAllocator(cfg.strategy),
+            config=CoordinatorConfig(),
+        )
 
         self._intrinsics = CameraIntrinsics()
         self._mount = CameraMount()
@@ -128,15 +139,21 @@ class Runner:
     def lot(self) -> LotSpec:
         return self._lot
 
-    def assign_initial_zones(self) -> None:
-        """Phase 2 is one robot and a fixed zone list. Phase 4 replaces this wholesale
-        with the coordinator; keeping it dumb here makes that swap obvious."""
-        zones = list(self._cfg.zones) or [z.id for z in self._lot.zones]
-        for index, robot_id in enumerate(self._robot_ids):
-            zone_id = zones[index % len(zones)]
-            self._agents[robot_id].assign(zone_id)
-            self._assigned[robot_id] = zone_id
-            log.info("zone_assigned", robot=robot_id, zone=zone_id)
+    def start(self) -> None:
+        """Register the fleet with the coordinator.
+
+        Phase 2 assigned zones by hand here. That is gone: the coordinator now decides who
+        gets what, on the same event-triggered path it uses for every later reallocation,
+        so there is no bootstrap special case to diverge.
+        """
+        poses = {robot_id: self._backend.sense(robot_id).pose for robot_id in self._robot_ids}
+        self._coord.start(0, poses=poses)
+        log.info(
+            "fleet_registered",
+            robots=list(self._robot_ids),
+            zones=len(self._lot.zones),
+            strategy=str(self._cfg.strategy),
+        )
 
     async def _perceive(self, client: aiomqtt.Client, samples: Sequence[object]) -> int:
         """Detect, then geolocate, then publish. Never merged, never reordered.
@@ -203,7 +220,18 @@ class Runner:
                 broker=f"{cfg.mqtt_host}:{cfg.mqtt_port}",
             )
             for step_index in range(cfg.max_steps):
+                now_ns = self._backend.now_ns()
                 samples = [agent.tick() for agent in self._agents.values()]
+                for sample in samples:
+                    self._coord.ingest(sample)
+                for decision in self._coord.tick(now_ns):
+                    log.info(
+                        "coordinator",
+                        kind=str(decision.kind),
+                        robot=decision.robot_id,
+                        zone=decision.zone_id,
+                        reason=decision.reason,
+                    )
                 self._backend.step(dt_s)
 
                 if step_index % cfg.publish_every == 0:
@@ -253,7 +281,13 @@ class Runner:
 def parse_args(argv: Sequence[str] | None = None) -> RunnerConfig:
     parser = argparse.ArgumentParser(prog="parkscan_runner", description=__doc__)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--robots", type=int, default=1)
+    parser.add_argument("--robots", type=int, default=3)
+    parser.add_argument(
+        "--strategy",
+        choices=[s.value for s in Strategy],
+        default=Strategy.GREEDY.value,
+        help="zone allocation strategy",
+    )
     parser.add_argument("--zones", default="", help="comma-separated zone ids")
     parser.add_argument("--steps", type=int, default=20_000)
     parser.add_argument("--run-id", default="dev")
@@ -283,6 +317,7 @@ def parse_args(argv: Sequence[str] | None = None) -> RunnerConfig:
         robots=args.robots,
         zones=tuple(z for z in args.zones.split(",") if z),
         start_soc=args.start_soc,
+        strategy=Strategy(args.strategy),
     )
 
 
@@ -290,7 +325,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     structlog.configure(wrapper_class=structlog.make_filtering_bound_logger(20))
     cfg = parse_args(argv)
     runner = Runner(cfg)
-    runner.assign_initial_zones()
+    runner.start()
     with contextlib.suppress(KeyboardInterrupt):
         return asyncio.run(runner.run())
     return 130

@@ -58,7 +58,7 @@ from parkscan_core.types import BayState, Pose2D, RobotId, SensorFrame, Severity
 from parkscan_sim.battery import charge_soc, drain_soc
 from parkscan_sim.config import SimConfig
 from parkscan_sim.kinematics import clamp_twist, integrate_pose, wrap_angle
-from parkscan_sim.obstacles import ObstacleField, build_obstacle_field
+from parkscan_sim.obstacles import ObstacleField, Rect, build_obstacle_field
 from parkscan_sim.sensors import cast_rays
 
 __all__ = ["Collision", "CollisionKind", "SimLite"]
@@ -330,9 +330,43 @@ class SimLite:
             pose=state.pose,
             twist=state.measured,
             battery_soc=state.battery_soc,
-            ranges=cast_rays(state.pose, self._field, self._cfg.sensor),
+            ranges=cast_rays(state.pose, self._sensed_field(robot), self._cfg.sensor),
             camera=None,
         )
+
+    def _sensed_field(self, robot: RobotId) -> ObstacleField:
+        """Static obstacles plus the OTHER robots, as seen by ``robot``.
+
+        Robots have to appear in each other's range readings or they cannot avoid one
+        another: the autonomy's local avoidance layer works entirely from
+        ``SensorFrame.ranges``, so a fleet whose members are invisible to each other will
+        drive straight through one another and only the collision counter will notice.
+        This was found by acceptance criterion C1 failing under failure injection, where
+        two robots rerouting around a lost robot's zone grazed at 0.06 m.
+
+        Each robot is approximated as the axis-aligned square that bounds its disc. That
+        over-estimates it at the corners by (sqrt(2) - 1) * r, which is conservative in the
+        right direction -- a robot yields slightly early rather than slightly late -- and
+        keeps the ray caster to the single slab routine it already has.
+
+        Rebuilt per call rather than cached: poses change every tick, and a stale field is
+        a robot avoiding where its neighbour used to be.
+        """
+        radius = self._cfg.robot_radius_m
+        others = [
+            Rect(
+                id=f"robot_{other}",
+                x_min=state.pose.x_m - radius,
+                y_min=state.pose.y_m - radius,
+                x_max=state.pose.x_m + radius,
+                y_max=state.pose.y_m + radius,
+            )
+            for other, state in self._robots.items()
+            if other != robot
+        ]
+        if not others:
+            return self._field
+        return ObstacleField([*self._field.rects, *others])
 
     def actuate(self, robot: RobotId, cmd: TwistCmd) -> None:
         """Latch ``cmd`` (saturated to :class:`~parkscan_sim.kinematics.TwistLimits`).

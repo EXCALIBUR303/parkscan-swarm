@@ -192,10 +192,14 @@ scarcer than robots (2 bays, 3 robots)** so contention is real rather than fabri
   it holds the bay. Every action carries its token; the resource records the highest token ever
   accepted and **rejects anything lower**. ~15 lines, directly testable. This is the same mechanism
   VDA 5050 uses in industry via `orderId` / `orderUpdateId`.
-- **Deadlock** is broken on two independent Coffman conditions: **circular wait** by total resource
-  ordering (never request an id lower than the highest currently held — asserted in code, so the
-  invariant is tested rather than assumed), and **no-preemption** by lease expiry. Ordering alone
-  does nothing about a dead robot holding a bay.
+- **Deadlock** is broken on two independent Coffman conditions. ⚠️ **Superseded by
+  [ADR-0007](adr/0007-coordinator-concurrency.md):** the circular-wait half below does not survive the
+  lane graph — routes acquire segments in traversal order, which is not id order, so the ordering rule
+  would outlaw ordinary routes. Phase 4 breaks **hold-and-wait** instead, via atomic per-leg
+  acquisition. The reasoning is kept here because why it fails is worth more than a tidier document.
+  ~~**circular wait** by total resource ordering (never request an id lower than the highest currently
+  held), and~~ **no-preemption** by lease expiry — which is retained, because neither ordering nor
+  atomic acquisition does anything about a dead robot holding a bay.
 - **Starvation** is prevented by a FIFO queue per resource with aging
   (`effective_priority = base + α · wait_time`), so a critically-low robot can jump the bay queue
   without unbounded waits for anyone else.

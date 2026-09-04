@@ -64,24 +64,24 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done & verified · `[!]` blocke
 - [ ] `DATASETS.md` + download script — deferred: only needed when a REAL model is trained (ADR-0006). No datasets are used yet.
 - [x] **Verify:** A4, A5
 
-## Phase 4a — Swarm design review (**Opus**)
-- [ ] Review allocator / lease / fencing / recovery design against the Phase 2–3 implementation
-- [ ] Confirm the deadlock argument holds against the real lane graph
+## Phase 4a — Swarm design review (**Opus**) — **COMPLETE** (2026-09-04) → [ADR-0007](docs/adr/0007-coordinator-concurrency.md)
+- [x] Review allocator / lease / fencing / recovery design against the Phase 2–3 implementation
+- [x] Confirm the deadlock argument holds against the real lane graph
 
-## Phase 4b — Swarm implementation (Sonnet)
-- [ ] 3 robots, namespaced; zone allocation, no duplicate work (A6)
-- [ ] `allocate()` as a pure function; `greedy` + `hungarian` + `ssi`
-- [ ] Property test: `greedy_total >= hungarian_total` over 1000 matrices (C9) + pinned 6.29× regression
-- [ ] Lease manager: TTL, renewal, reclaim, **fencing tokens** (C5)
-- [ ] Total resource ordering invariant asserted in code; FIFO queue + aging
-- [ ] Assignment epochs; stale-epoch reports dropped (C6)
-- [ ] Failure detection: MQTT LWT + heartbeat deadline + stuck detection (excluding `WAITING_ON_LEASE`)
-- [ ] Recovery: requeue with remaining cells; hysteresis + cooldown + event-triggered + hard cap
-- [ ] Lazarus re-registration
-- [ ] Failure injection: low-battery, offline, stuck, Lazarus — ≥20 events (A7)
-- [ ] `make bench`: 30 seeds × 3 strategies → `results.csv` + `results.json` (git SHA, config hash, versions)
-- [ ] Paired bootstrap 95% CIs + win/loss/tie
-- [ ] **Verify:** A6, A7, A11, C1–C4
+## Phase 4b — Swarm implementation (Sonnet) — **COMPLETE** (2026-09-04)
+- [x] 3 robots, namespaced; zone allocation, no duplicate work (A6)
+- [x] `allocate()` as a pure function; `greedy` + `hungarian` + `ssi`
+- [x] Property test: `greedy_total >= hungarian_total` over 1000 matrices (C9) + pinned 6.29× regression
+- [x] Lease manager: TTL, renewal, reclaim, **fencing tokens** (C5)
+- [x] ~~Total resource ordering~~ **atomic per-leg acquisition** (ADR-0007 supersedes: routes acquire lanes out of id order, so the Havender rule would outlaw ordinary routes); FIFO queue + aging
+- [x] Assignment epochs; stale-epoch reports dropped (C6)
+- [x] Failure detection: MQTT LWT + heartbeat deadline + stuck detection (excluding `WAITING_ON_LEASE`)
+- [x] Recovery: requeue with remaining cells; hysteresis + cooldown + event-triggered + hard cap
+- [x] Lazarus re-registration
+- [x] Failure injection: low-battery, offline, stuck, Lazarus — ≥20 events (A7)
+- [x] `make bench`: 30 seeds × 3 strategies → `results.csv` + `results.json` (git SHA, config hash, versions)
+- [x] Paired bootstrap 95% CIs + win/loss/tie
+- [x] **Verify:** A6, A7, A11, C1–C4
 
 ## Phase 5 — Dashboard & polish (Sonnet)
 - [ ] Fleet cards: battery, position, task, zone, health, state

@@ -164,12 +164,37 @@ def test_a_latched_command_persists_across_ticks(sim: SimLite) -> None:
 
 
 def test_a_forward_ray_sees_the_west_wall_at_the_analytic_distance(lot: LotSpec) -> None:
-    """robot_1 starts on the bay spur at x = 8 facing the west wall at x = 0."""
-    world = SimLite(SimConfig(start_heading_jitter_rad=1e-12))
+    """robot_1 starts on the bay spur at x = 8 facing the west wall at x = 0.
+
+    With a single robot in the world the ray runs clear to the wall. Configured for the
+    whole fleet it does not, because robot_3 is parked at x = 2.5 on the same line —
+    asserted below, since a fleet whose members cannot see each other cannot avoid each
+    other.
+    """
+    world = SimLite(SimConfig(robot_count=1, start_heading_jitter_rad=1e-12))
     world.reset(SEED, lot)
     params = world.config.sensor
     ranges = world.sense("robot_1").ranges
     assert ranges[params.forward_index] == pytest.approx(8.0, abs=1e-6)
+
+
+def test_a_robot_occludes_the_wall_for_the_robot_behind_it(lot: LotSpec) -> None:
+    """Robots must appear in one another's range readings.
+
+    The autonomy avoids obstacles entirely from ``SensorFrame.ranges``, so if robots were
+    invisible to each other they would drive straight through one another and only the
+    collision counter would notice. That is exactly what acceptance criterion C1 caught
+    under failure injection before this was fixed.
+    """
+    world = SimLite(SimConfig(start_heading_jitter_rad=1e-12))
+    world.reset(SEED, lot)
+    params = world.config.sensor
+
+    # robot_1 at x = 8.0, robot_3 at x = 2.5, both at y = 17.5, robot_1 facing west.
+    forward = world.sense("robot_1").ranges[params.forward_index]
+    near_edge = 8.0 - 2.5 - world.config.robot_radius_m
+    assert forward == pytest.approx(near_edge, abs=1e-6)
+    assert forward < 8.0, "the neighbour must occlude the wall behind it"
 
 
 # ---------------------------------------------------------------------- battery --
