@@ -60,10 +60,18 @@ three robot models at the same seed-independent start poses `SimLite` already de
 lot's charging-bay/lane-node positions). Three ROS 2 namespaces, `/robot_1`, `/robot_2`,
 `/robot_3` — matching `SimLite.robots()` and `docs/DATA_MODEL.md`'s `robot.id` values exactly,
 so nothing above the backend layer needs to know which backend produced an id. Each namespace
-carries the four topics `parkscan_core/world.py` already names: `/<ns>/odom` (`nav_msgs/Odometry`),
-`/<ns>/scan` (`sensor_msgs/LaserScan`), `/<ns>/camera/image_raw` (`sensor_msgs/Image`), `/<ns>/cmd_vel`
-(`geometry_msgs/Twist`) — wired via `ros_gz_bridge`'s topic-mapping YAML, one entry per topic
-per robot.
+carries three of the four topics `parkscan_core/world.py` names: `/<ns>/odom`
+(`nav_msgs/Odometry`), `/<ns>/scan` (`sensor_msgs/LaserScan`), `/<ns>/cmd_vel`
+(`geometry_msgs/Twist`). `/<ns>/camera/image_raw` is not wired at all, since no camera sensor is
+in the SDF (Scope, below). The three that exist are wired via `ros_gz_bridge`'s
+`parameter_bridge` — **not** my own rclpy bridge (§6). Two different bridges doing two different
+jobs: this one translates Gazebo's own transport into genuine ROS 2 topics; mine (below) relays
+those ROS 2 topics on to MQTT, since `rclpy` cannot run on the host. Verified directly, one topic
+per direction:
+`/robot_1/odom@nav_msgs/msg/Odometry[gz.msgs.Odometry` (`[` = Gazebo → ROS) and
+`/robot_1/cmd_vel@geometry_msgs/msg/Twist]gz.msgs.Twist` (`]` = ROS → Gazebo), repeated per
+robot; confirmed odometry and lidar data actually flowing through to `ros2 topic echo` this way,
+not just that the bridge process starts without error.
 
 The lidar sensor plugin in the SDF **must** be configured for 37 rays over a 1.5π field of view
 capped at 12.0 m — `parkscan_sim.sensors.SensorParams`'s exact defaults. `SensorFrame.ranges` is
@@ -145,11 +153,9 @@ this.
 `parkscan_sim.battery`'s functions (`drain_soc`, `charge_soc`, `discharge_power_w`,
 `BatteryParams`) take `(soc, v_mps, dt, params)` — no `SimLite` state, no world reference. They
 are already exactly as backend-agnostic as `parkscan_core.lot`/`parkscan_core.types`.
-**Recommendation for whoever implements this ADR: relocate `battery.py` from `parkscan_sim` to
-`parkscan_core`, re-exported from `parkscan_sim` for the existing import sites.** This is a
-refactor of tested, committed code and is explicitly *not* being done as part of writing this
-ADR — it is a should-do named here so the implementer doesn't have to re-derive the same
-architectural observation.
+**Done, not just recommended:** `battery.py` has been relocated from `parkscan_sim` to
+`parkscan_core`, re-exported from `parkscan_sim` for the existing import sites — `parkscan_ros2`
+depends only on `parkscan_core`, never on a peer backend.
 
 `Ros2WorldBackend` (not the bridge) owns per-robot SOC as a plain Python float, updated every
 `step(dt)` from the *measured* twist Gazebo reports back (the real, physics-simulated velocity —
@@ -157,6 +163,22 @@ matching `SimLite`'s own "measured twist, not commanded" discipline) and from pr
 charging bay (same `lot.charging_bays` positions and the same `charge_dock_radius_m` semantics
 `SimLite` uses, so "docked" means the same thing on both backends). The bridge, by contrast,
 relays pose/twist/ranges only — it has no battery concept and needs none.
+
+**A third empirical finding, again confirmed against a real bridge before this line was
+written:** `gz-sim-odometry-publisher-system`'s velocity estimate is unreliable for roughly the
+first ten samples after the world starts or resets. Watched directly: ten consecutive real
+odometry messages from a robot that had never been commanded to move and never left its spawn
+position reported `linear.x/y` of `160, 80, 53.3, 40, 32, 26.7, 22.9, 20, 17.8, 16` — an exact
+`160/n` decay — before correctly settling at `0.0` from the eleventh sample on. The pattern is
+diagnostic of a finite-difference estimator dividing some tiny startup delta by elapsed time
+since `t=0`; it is a real, reproducible warm-up artifact, not sensor noise to average away.
+**Consequence for `Ros2WorldBackend`: clamp the reported `v_mps` to `[0, NavConfig.max_v_mps]`
+before ever passing it to `discharge_power_w`.** A fleet that never legitimately exceeds 1.2 m/s
+has no honest reading above that bound to trust, and an unclamped spike would otherwise drain a
+fresh reset's battery by a real, if small, spurious amount (a single 160 m/s tick alone costs
+~0.6% of a 20 Wh pack — `discharge_power_w(160, BatteryParams()) * 0.05 / 3600 / 20`). This is a
+clamp on an already-known-bogus reading, not a general noise filter, and should not be read as
+license to distrust the sensor more broadly than this one measured failure mode.
 
 ### 5. Reset/seed semantics — the reproducibility gap, stated not hidden
 
