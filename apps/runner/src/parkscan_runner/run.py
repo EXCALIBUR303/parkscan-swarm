@@ -252,8 +252,30 @@ class Runner:
 
                 for sample in samples:
                     covered.update(sample.covered_cells)
-                    progress = progress_payload(sample, epoch=self._epoch)
-                    if progress is not None:
+                    zone_status = (
+                        self._coord.zone_status(sample.zone_id)
+                        if sample.zone_id is not None
+                        else None
+                    )
+                    # Only PLANNED cells count toward coverage. The sensor footprint
+                    # sometimes reaches a cell the planned path never touches -- the kerb
+                    # strip beside an aisle -- and counting those would report more than
+                    # 100% of a zone inspected, which is worse than useless. This mirrors
+                    # ZoneProgress.fraction rather than inventing a second definition.
+                    planned_done = (
+                        len(set(zone_status.cells_done) & set(zone_status.cells_total))
+                        if zone_status is not None
+                        else 0
+                    )
+                    progress = progress_payload(
+                        sample,
+                        epoch=self._epoch,
+                        cells_done_total=planned_done,
+                        cells_total=(
+                            len(zone_status.cells_total) if zone_status is not None else 0
+                        ),
+                    )
+                    if progress is not None and sample.zone_id is not None:
                         await client.publish(
                             topic(cfg.run_id, sample.robot_id, "progress"),
                             json.dumps(progress).encode(),

@@ -32,6 +32,7 @@ from parkscan_api.models import UNREGISTERED_SEED, Detection, ParkingSpace, Robo
 from parkscan_api.schemas import (
     BBoxIn,
     ComponentStatus,
+    CoverageOut,
     DetectionOut,
     HealthResponse,
     ParkingSpaceOut,
@@ -191,6 +192,48 @@ def _parse_bbox(raw: str) -> tuple[float, float, float, float]:
     if min_lon > max_lon or min_lat > max_lat:
         raise ProblemException(400, "Bad Request", "bbox corners are out of order.")
     return min_lon, min_lat, max_lon, max_lat
+
+
+@router.get("/coverage", response_model=list[CoverageOut])
+async def coverage(
+    session: SessionDep, settings: SettingsDep, run_id: RunIdQuery = None
+) -> list[CoverageOut]:
+    """Per-zone coverage, the data behind the dashboard's choropleth.
+
+    Coverage is ``cells_done / cells_total`` — a discrete, countable quantity. It is
+    deliberately not smoothed or interpolated into a heatmap: a kernel density estimate
+    would smear across zone boundaries and imply a continuous measurement nobody took
+    (ADR-0004).
+
+    A zone with no planned cells reports 0.0 rather than 1.0. "Nothing to do" and "all
+    done" are different facts, and rounding the first into the second would show a lot as
+    fully inspected before a robot had moved.
+    """
+    run_uuid = resolve_run_uuid(run_id, settings)
+    # Provenance is joined from the run rather than read off the zone. A zone is a piece of
+    # the lot's geometry, not an observation, so it carries no data_source of its own; what
+    # is simulated is the RUN that produced these coverage numbers.
+    rows = (
+        await session.execute(
+            sa.select(Zone, Run.data_source)
+            .join(Run, Run.id == Zone.run_id)
+            .where(Zone.run_id == run_uuid)
+            .order_by(Zone.id)
+        )
+    ).all()
+    return [
+        CoverageOut(
+            zone_id=zone.id,
+            state=zone.state,
+            cells_done=zone.cells_done,
+            cells_total=zone.cells_total,
+            coverage=(zone.cells_done / zone.cells_total) if zone.cells_total else 0.0,
+            assigned_robot_id=zone.assigned_robot_id,
+            epoch=zone.epoch,
+            data_source=data_source,
+        )
+        for zone, data_source in rows
+    ]
 
 
 @router.get("/detections", response_model=list[DetectionOut])

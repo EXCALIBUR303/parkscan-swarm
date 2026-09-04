@@ -14,9 +14,11 @@ origin would put every row on the map in the wrong place, silently.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
 from typing import Any
 
 import sqlalchemy as sa
+import structlog
 from geoalchemy2.elements import WKTElement
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,9 +32,29 @@ from parkscan_api.models import (
     Telemetry,
     Zone,
 )
-from parkscan_api.schemas import DetectionMessage, RunMeta, TelemetryMessage
+from parkscan_api.schemas import (
+    DetectionMessage,
+    ProgressMessage,
+    RunMeta,
+    TelemetryMessage,
+)
 from parkscan_core.geo import Origin, lot_to_lonlat
-from parkscan_core.types import DataSource
+from parkscan_core.lot import LotSpec
+from parkscan_core.types import DataSource, ZoneState
+
+log = structlog.get_logger(__name__)
+
+
+def _polygon_wkt(ring: Sequence[tuple[float, float]], origin: Origin | None) -> WKTElement:
+    """A lot-metre ring -> a WGS84 ``geography(Polygon)``, closing the ring."""
+    if origin is None:
+        msg = "cannot project a zone polygon without the lot origin"
+        raise ValueError(msg)
+    points = [lot_to_lonlat(x, y, origin) for x, y in ring]
+    if points[0] != points[-1]:
+        points.append(points[0])
+    body = ", ".join(f"{lon!r} {lat!r}" for lon, lat in points)
+    return WKTElement(f"POLYGON(({body}))", srid=4326)
 
 
 def point_wkt(lon_deg: float, lat_deg: float) -> WKTElement:
@@ -212,6 +234,101 @@ async def record_telemetry(
         "zone_id": message.zone_id,
         "epoch": message.epoch,
         "data_source": message.data_source.value,
+    }
+
+
+async def record_progress(
+    session: AsyncSession,
+    run_uuid: uuid.UUID,
+    robot_id: str,
+    message: ProgressMessage,
+    *,
+    data_source: DataSource,
+    lot: LotSpec | None = None,
+) -> dict[str, Any] | None:
+    """Store one zone's cumulative coverage. Returns the WebSocket payload, or ``None``
+    when the report was fenced out.
+
+    EPOCH FENCING, mirroring the coordinator: a report is accepted only when its epoch is
+    at least the zone's. A robot that was declared dead mid-sweep may still have progress
+    in flight, and applying it would credit the new holder with the old holder's work — or
+    worse, move coverage backwards. The check lives here as well as in the coordinator
+    because this is a separate process reached over a network that reorders.
+
+    Written by ASSIGNMENT, not addition, so a QoS-1 redelivery is a no-op.
+    """
+    await ensure_run(session, run_uuid, data_source)
+    await ensure_robot(session, run_uuid, robot_id, data_source)
+
+    zone = (
+        await session.execute(
+            sa.select(Zone).where(Zone.run_id == run_uuid, Zone.id == message.zone_id)
+        )
+    ).scalar_one_or_none()
+
+    if zone is None:
+        # Zone geometry comes from the authoritative lot file, never from a progress
+        # message. A robot reports how far it got; it is not the source of truth for where
+        # the zone IS, and a row invented from telemetry would have no polygon to draw.
+        spec = (
+            None if lot is None else next((z for z in lot.zones if z.id == message.zone_id), None)
+        )
+        if spec is None:
+            log.warning(
+                "progress_for_unknown_zone",
+                zone=message.zone_id,
+                detail="not in the API's lot file; ignoring",
+            )
+            return None
+        origin = lot.origin.as_origin() if lot is not None else None
+        zone = Zone(
+            run_id=run_uuid,
+            id=spec.id,
+            polygon=_polygon_wkt(spec.polygon, origin),
+            sweep_length_m=spec.sweep_length_m,
+            epoch=message.epoch,
+            cells_total=message.cells_total,
+            cells_done=message.cells_done_total,
+            assigned_robot_id=robot_id,
+            state=ZoneState.IN_PROGRESS,
+            # No data_source column: a zone is geometry, not an observation. Provenance
+            # belongs to the RUN, and GET /api/v1/coverage joins it from there.
+        )
+        session.add(zone)
+    else:
+        if message.epoch < zone.epoch:
+            log.info(
+                "progress_fenced_out",
+                zone=message.zone_id,
+                report_epoch=message.epoch,
+                zone_epoch=zone.epoch,
+            )
+            return None
+        if message.epoch > zone.epoch:
+            # A newer assignment: the zone changed hands, so its progress restarts from
+            # whatever the new holder reports rather than carrying the old holder's count.
+            zone.epoch = message.epoch
+        zone.cells_total = message.cells_total
+        zone.cells_done = message.cells_done_total
+        zone.assigned_robot_id = robot_id
+        zone.state = (
+            ZoneState.COMPLETE
+            if message.cells_total > 0 and message.cells_done_total >= message.cells_total
+            else ZoneState.IN_PROGRESS
+        )
+
+    await session.commit()
+    return {
+        "zone_id": message.zone_id,
+        "robot_id": robot_id,
+        "epoch": message.epoch,
+        "cells_done": message.cells_done_total,
+        "cells_total": message.cells_total,
+        "coverage": (
+            message.cells_done_total / message.cells_total if message.cells_total else 0.0
+        ),
+        "state": str(zone.state),
+        "data_source": str(data_source),
     }
 
 

@@ -32,13 +32,16 @@ from pydantic import ValidationError
 
 from parkscan_api.config import Settings
 from parkscan_api.db import ComponentHealth, Database
-from parkscan_api.ingest import record_detection, record_telemetry
-from parkscan_api.schemas import DetectionMessage, TelemetryMessage
+from parkscan_api.ingest import record_detection, record_progress, record_telemetry
+from parkscan_api.schemas import DetectionMessage, ProgressMessage, TelemetryMessage
 from parkscan_api.ws import ConnectionManager
 from parkscan_core.geo import Origin
+from parkscan_core.lot import LotSpec
 
 TELEMETRY = "telemetry"
 DETECTION = "detection"
+PROGRESS = "progress"
+ZONE = "zone"
 
 log: structlog.stdlib.BoundLogger = structlog.get_logger("parkscan.mqtt")
 
@@ -54,6 +57,10 @@ def telemetry_filter(run_id: str) -> str:
 
 def detection_filter(run_id: str) -> str:
     return f"{topic_root(run_id)}/robot/+/detection"
+
+
+def progress_filter(run_id: str) -> str:
+    return f"{topic_root(run_id)}/robot/+/progress"
 
 
 def robot_topic(run_id: str, robot_id: str, suffix: str) -> str:
@@ -89,6 +96,10 @@ class IngestStats:
     invalid: int = 0
     ignored: int = 0
     failed: int = 0
+    fenced: int = 0
+    """Progress reports dropped because their epoch was stale. Counted, not hidden: a
+    handover is supposed to produce these, and a number that never moves would mean the
+    fencing check is not running."""
     connects: int = 0
     last_error: str | None = field(default=None)
 
@@ -99,6 +110,7 @@ class IngestStats:
             "invalid": self.invalid,
             "ignored": self.ignored,
             "failed": self.failed,
+            "fenced": self.fenced,
             "connects": self.connects,
         }
 
@@ -113,11 +125,13 @@ class MqttIngest:
         manager: ConnectionManager,
         *,
         origin: Origin | None = None,
+        lot: LotSpec | None = None,
     ) -> None:
         self._settings = settings
         self._database = database
         self._manager = manager
         self._origin = origin
+        self._lot = lot
         self._task: asyncio.Task[None] | None = None
         self._connected = False
         self.stats = IngestStats()
@@ -176,6 +190,7 @@ class MqttIngest:
                 async with self._build_client() as client:
                     await client.subscribe(telemetry_filter(settings.run_id), qos=settings.mqtt_qos)
                     await client.subscribe(detection_filter(settings.run_id), qos=settings.mqtt_qos)
+                    await client.subscribe(progress_filter(settings.run_id), qos=settings.mqtt_qos)
                     self._connected = True
                     self.stats.connects += 1
                     self.stats.last_error = None
@@ -212,7 +227,7 @@ class MqttIngest:
             self.stats.ignored += 1
             log.debug("mqtt_ignored", topic=topic)
             return False
-        if parsed.suffix not in (TELEMETRY, DETECTION):
+        if parsed.suffix not in (TELEMETRY, DETECTION, PROGRESS):
             self.stats.ignored += 1
             return False
 
@@ -224,8 +239,11 @@ class MqttIngest:
             return False
 
         try:
+            message: TelemetryMessage | DetectionMessage | ProgressMessage
             if parsed.suffix == TELEMETRY:
-                message: TelemetryMessage | DetectionMessage = TelemetryMessage.model_validate(body)
+                message = TelemetryMessage.model_validate(body)
+            elif parsed.suffix == PROGRESS:
+                message = ProgressMessage.model_validate(body)
             else:
                 message = DetectionMessage.model_validate(body)
         except ValidationError as exc:
@@ -241,13 +259,19 @@ class MqttIngest:
             log.error("mqtt_persist_failed", topic=topic, detail=self.stats.last_error)
             return False
 
+        if envelope is None:
+            self.stats.fenced += 1
+            return True
+
         self.stats.persisted += 1
         self._manager.broadcast(envelope)
         return True
 
     async def _persist(
-        self, parsed: ParsedTopic, message: TelemetryMessage | DetectionMessage
-    ) -> dict[str, Any]:
+        self,
+        parsed: ParsedTopic,
+        message: TelemetryMessage | DetectionMessage | ProgressMessage,
+    ) -> dict[str, Any] | None:
         run_uuid = self._settings.run_uuid
         async with self._database.session() as session:
             if isinstance(message, TelemetryMessage):
@@ -255,15 +279,39 @@ class MqttIngest:
                     session, run_uuid, parsed.robot_id, message, origin=self._origin
                 )
                 kind = TELEMETRY
+            elif isinstance(message, ProgressMessage):
+                fenced = await record_progress(
+                    session,
+                    run_uuid,
+                    parsed.robot_id,
+                    message,
+                    data_source=self._settings.data_source,
+                    lot=self._lot,
+                )
+                if fenced is None:
+                    # A stale-epoch report. Dropped, not an error: the fencing token did
+                    # exactly its job, and counting it as a failure would make a healthy
+                    # handover look like a fault.
+                    return None
+                payload = fenced
+                kind = ZONE
             else:
                 payload = await record_detection(
                     session, run_uuid, parsed.robot_id, message, origin=self._origin
                 )
                 kind = DETECTION
+        # A progress report carries no data_source of its own: it says how far a zone got,
+        # not where the observation came from. Provenance for it is the run's, which the
+        # runner configured and this process holds.
+        data_source = (
+            self._settings.data_source
+            if isinstance(message, ProgressMessage)
+            else message.data_source
+        )
         return {
             "type": kind,
             "stamp": dt.datetime.now(tz=dt.UTC).isoformat(),
-            "data_source": message.data_source.value,
+            "data_source": data_source.value,
             "payload": payload,
         }
 

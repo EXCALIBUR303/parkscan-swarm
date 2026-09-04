@@ -58,12 +58,24 @@ def telemetry_payload(
     }
 
 
-def progress_payload(sample: TelemetrySample, *, epoch: dt.datetime) -> dict[str, Any] | None:
+def progress_payload(
+    sample: TelemetrySample,
+    *,
+    epoch: dt.datetime,
+    cells_done_total: int,
+    cells_total: int,
+) -> dict[str, Any] | None:
     """Coverage progress, or ``None`` when this tick covered nothing new.
 
-    Reported per CELL rather than per zone. The granularity is the point: Phase 4
-    requeues a failed robot's *remaining* cells, which is only possible if progress was
-    ever reported more finely than the assignment.
+    Carries both the cells newly covered on this tick and the CUMULATIVE totals. The
+    cumulative pair is what the backend stores, and it is stored by assignment rather than
+    by addition: MQTT QoS 1 is at-least-once, so a redelivered message that incremented a
+    counter would inflate coverage past 100% and the dashboard would report work that never
+    happened. Setting an absolute value is idempotent under redelivery and reordering.
+
+    The per-cell list is still sent because the granularity is the point: Phase 4 requeues
+    a failed robot's *remaining* cells, which is only possible if progress was ever
+    reported more finely than the assignment.
     """
     if not sample.covered_cells:
         return None
@@ -71,6 +83,8 @@ def progress_payload(sample: TelemetrySample, *, epoch: dt.datetime) -> dict[str
         "zone_id": sample.zone_id,
         "epoch": sample.epoch,
         "cells_done": list(sample.covered_cells),
+        "cells_done_total": cells_done_total,
+        "cells_total": cells_total,
         "stamp": sim_stamp(sample.stamp_ns, epoch),
     }
 

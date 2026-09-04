@@ -83,18 +83,18 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done & verified · `[!]` blocke
 - [x] Paired bootstrap 95% CIs + win/loss/tie
 - [x] **Verify:** A6, A7, A11, C1–C4
 
-## Phase 5 — Dashboard & polish (Sonnet)
-- [ ] Fleet cards: battery, position, task, zone, health, state
-- [ ] Coverage choropleth + legend with numeric breaks
-- [ ] Detection list + filtering (severity, confidence, kind, time) + evidence viewer
-- [ ] Alert/task feed
-- [ ] Persistent non-dismissable SIMULATED badge, rendered **from `data_source`** (H1, H2)
-- [ ] Empty / loading / error states everywhere
-- [ ] Accessible data-table equivalent of the map; polite live region for **changes only**
-- [ ] Keyboard nav, focus rings, `prefers-reduced-motion`; `@axe-core/playwright` pass
-- [ ] Playwright E2E against a recorded WS fixture (verify binaries launch on Darwin 27 first)
-- [ ] README with real screenshots and only reproducible numbers
-- [ ] **Verify:** A9, A10
+## Phase 5 — Dashboard & polish (Sonnet) — **MOSTLY COMPLETE** (2026-09-04); alert feed, detection filtering and Playwright E2E not built
+- [x] Fleet cards: battery, position, task, zone, health, state
+- [x] Coverage choropleth + legend with numeric breaks
+- [~] Detection list with severity/confidence/range — **filtering and the evidence viewer are not built** (the simulated detector emits no image evidence)
+- [ ] Alert/task feed — **not built**; alerts exist in the schema and API but no UI
+- [x] Persistent non-dismissable SIMULATED badge, rendered **from `data_source`** (H1, H2)
+- [x] Empty / loading / error states everywhere
+- [x] Accessible data-table equivalent of the map; polite live region for **changes only**
+- [~] Keyboard nav, focus rings, `prefers-reduced-motion` done; **`@axe-core/playwright` not run** (Playwright binaries never verified on Darwin 27)
+- [ ] Playwright E2E — **not built**; binaries were never verified on Darwin 27
+- [x] README with real screenshots and only reproducible numbers
+- [x] **Verify:** A9, A10
 
 ## Phase 6 — Final review (**Opus**)
 - [ ] Deep review: incomplete paths, races, weak tests, security, setup correctness

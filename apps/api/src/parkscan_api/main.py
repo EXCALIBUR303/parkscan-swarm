@@ -29,7 +29,7 @@ from parkscan_api.mqtt import MqttIngest
 from parkscan_api.routers import router, ws_router
 from parkscan_api.ws import ConnectionManager
 from parkscan_core.geo import Origin
-from parkscan_core.lot import load_lot
+from parkscan_core.lot import LotSpec, load_lot
 
 log: structlog.stdlib.BoundLogger = structlog.get_logger("parkscan.api")
 
@@ -44,6 +44,14 @@ Local development only: no authentication, bound to 127.0.0.1. Production auth
 (OAuth2 bearer, per-robot MQTT credentials, TLS) is a documented gap, not a
 completed feature.
 """
+
+
+def load_spec(path: Path) -> tuple[LotSpec | None, str | None]:
+    """The lot itself, for seeding zone geometry. ``(None, reason)`` on any failure."""
+    try:
+        return load_lot(path), None
+    except Exception as exc:
+        return None, f"{type(exc).__name__}: {exc}".strip()[:300]
 
 
 def load_origin(path: Path) -> tuple[Origin | None, str | None]:
@@ -76,7 +84,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         origin, lot_error = load_origin(resolved.lot_path)
         if lot_error is not None:
             log.warning("lot_origin_unavailable", path=str(resolved.lot_path), detail=lot_error)
-        ingest = MqttIngest(resolved, database, manager, origin=origin)
+        spec, _spec_error = load_spec(resolved.lot_path)
+        ingest = MqttIngest(resolved, database, manager, origin=origin, lot=spec)
         state = AppState(
             settings=resolved,
             database=database,

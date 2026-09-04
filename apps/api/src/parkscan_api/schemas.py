@@ -115,6 +115,46 @@ class TelemetryMessage(_Wire):
         return _stamp_from(self.stamp, self.stamp_ns)
 
 
+class ProgressMessage(_Wire):
+    """``parkscan/v1/{run_id}/robot/{id}/progress``.
+
+    ``cells_done_total`` is CUMULATIVE and is stored by assignment, never by addition:
+    QoS 1 is at-least-once, and a redelivered increment would report coverage that never
+    happened.
+    """
+
+    zone_id: str = Field(min_length=1)
+    epoch: int = Field(ge=0)
+    cells_done: list[str] = Field(default_factory=list)
+    cells_done_total: int = Field(ge=0)
+    cells_total: int = Field(ge=0)
+    stamp: AwareDatetime | None = None
+    stamp_ns: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def _totals_consistent(self) -> Self:
+        if self.cells_done_total > self.cells_total:
+            msg = f"cells_done_total={self.cells_done_total} exceeds cells_total={self.cells_total}"
+            raise ValueError(msg)
+        return self
+
+    def resolved_stamp(self) -> dt.datetime:
+        return _stamp_from(self.stamp, self.stamp_ns)
+
+
+class CoverageOut(BaseModel):
+    """One zone's coverage, for the dashboard choropleth."""
+
+    zone_id: str
+    state: ZoneState
+    cells_done: int
+    cells_total: int
+    coverage: float
+    assigned_robot_id: str | None
+    epoch: int
+    data_source: DataSource
+
+
 class DetectionMessage(_Wire):
     """``parkscan/v1/{run_id}/robot/{id}/detection``."""
 

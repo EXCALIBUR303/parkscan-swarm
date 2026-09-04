@@ -3,6 +3,7 @@ import { LotMap } from './components/LotMap';
 import { SidePanel } from './components/SidePanel';
 import { SimulatedBadge } from './components/SimulatedBadge';
 import { APP_NAME } from './lib/provenance';
+import { useCoverage } from './lib/useCoverage';
 import { useLiveSocket } from './lib/useLiveSocket';
 import { useLot } from './lib/useLot';
 import { useDataSource } from './store';
@@ -26,6 +27,7 @@ export function App(): React.JSX.Element {
   const dataSource = useDataSource();
 
   useLiveSocket();
+  useCoverage();
 
   return (
     <div className="app">
