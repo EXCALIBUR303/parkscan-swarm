@@ -10,6 +10,7 @@ members = [
     "parkscan-core",
     "parkscan-eval",
     "parkscan-perception",
+    "parkscan-ros2",
     "parkscan-runner",
     "parkscan-sim",
     "parkscan-swarm",
@@ -551,6 +552,23 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "numpy", specifier = "==2.5.2" },
+    { name = "parkscan-core", editable = "packages/parkscan_core" },
+]
+
+[[package]]
+name = "parkscan-ros2"
+version = "0.1.0"
+source = { editable = "packages/parkscan_ros2" }
+dependencies = [
+    { name = "numpy" },
+    { name = "paho-mqtt" },
+    { name = "parkscan-core" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "numpy", specifier = "==2.5.2" },
+    { name = "paho-mqtt", specifier = ">=2.1,<3" },
     { name = "parkscan-core", editable = "packages/parkscan_core" },
 ]
 

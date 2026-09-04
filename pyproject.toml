@@ -29,6 +29,7 @@ parkscan-runner = { workspace = true }
 parkscan-perception = { workspace = true }
 parkscan-eval = { workspace = true }
 parkscan-coord = { workspace = true }
+parkscan-ros2 = { workspace = true }
 
 # --------------------------------------------------------------------------
 [tool.ruff]
@@ -59,7 +60,7 @@ strict = true
 # them would have been.
 exclude = ["^apps/api/migrations/"]
 warn_unreachable = true
-mypy_path = "packages/parkscan_core/src:packages/parkscan_sim/src:packages/parkscan_agent/src:packages/parkscan_perception/src:packages/parkscan_coord/src:apps/api/src:apps/runner/src:apps/eval/src"
+mypy_path = "packages/parkscan_core/src:packages/parkscan_sim/src:packages/parkscan_agent/src:packages/parkscan_perception/src:packages/parkscan_coord/src:packages/parkscan_ros2/src:apps/api/src:apps/runner/src:apps/eval/src"
 explicit_package_bases = true
 
 [[tool.mypy.overrides]]
