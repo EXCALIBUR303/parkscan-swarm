@@ -37,9 +37,24 @@ SubprocessRunner = Callable[[list[str], float], tuple[int, str]]
 
 
 def _default_runner(argv: list[str], timeout_s: float) -> tuple[int, str]:
-    result = subprocess.run(
-        argv, capture_output=True, text=True, timeout=timeout_s, check=False
-    )
+    """Run one subprocess, never raising.
+
+    Found the hard way, running the real system under load: ``subprocess.run``'s own
+    ``timeout`` argument raises ``TimeoutExpired`` if the process does not finish in
+    time -- ``check=False`` only suppresses raising on a non-zero *exit code*, not on a
+    timeout. That exception was escaping this function uncaught, past
+    :meth:`GzControl.step`'s own error handling (which only ever expected a
+    ``(code, output)`` tuple back), and crashing the caller's MQTT callback. Converted
+    to the same ``(non-zero code, message)`` shape a failed service call already
+    produces, so every caller's existing "non-zero exit -> ``GzControlError``" handling
+    covers this case too, instead of needing a second, parallel error path.
+    """
+    try:
+        result = subprocess.run(
+            argv, capture_output=True, text=True, timeout=timeout_s, check=False
+        )
+    except subprocess.TimeoutExpired:
+        return 1, f"subprocess timed out after {timeout_s}s: {argv!r}"
     return result.returncode, result.stdout
 
 

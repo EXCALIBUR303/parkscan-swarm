@@ -58,7 +58,12 @@ strict = true
 # working DDL. The migrations are verified by RUNNING them (upgrade + downgrade +
 # re-upgrade against a real PostGIS) in tests, which is stronger than type-checking
 # them would have been.
-exclude = ["^apps/api/migrations/"]
+#
+# `bridge/node.py` is excluded for a different, structural reason (ADR-0001): `rclpy`
+# and the ROS 2 message packages it imports cannot be installed on this host at all --
+# not "no stubs shipped," genuinely absent, the same reason the whole `WorldBackend`
+# adapter exists. It is verified by running it inside the `ros2-gz` container instead.
+exclude = ["^apps/api/migrations/", "^packages/parkscan_ros2/src/parkscan_ros2/bridge/node\\.py$"]
 warn_unreachable = true
 mypy_path = "packages/parkscan_core/src:packages/parkscan_sim/src:packages/parkscan_agent/src:packages/parkscan_perception/src:packages/parkscan_coord/src:packages/parkscan_ros2/src:apps/api/src:apps/runner/src:apps/eval/src"
 explicit_package_bases = true

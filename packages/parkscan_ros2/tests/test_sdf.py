@@ -51,6 +51,18 @@ def test_the_lidar_matches_sensorparams_defaults_exactly(lot: LotSpec) -> None:
     assert sdf.count(f"<samples>{LIDAR_N_RAYS}</samples>") == len(ROBOT_POSES)
 
 
+def test_every_robot_has_zero_friction_on_its_collision_surface() -> None:
+    """The bug this pins: DART's default friction damped a commanded 0.8 m/s down to a
+    steady ~0.31 m/s -- verified directly by commanding a real robot in a real Gazebo
+    and measuring its actual velocity, not by reading a physics manual. Zero friction on
+    the collision geometry restored velocity tracking to within float precision of
+    commanded. SimLite has no friction model either, so this keeps the two backends
+    comparable rather than one silently damping motion the other does not."""
+    lot = load_lot(LOT_YAML)
+    sdf = generate_world_sdf(lot, occupied_space_ids=(), robot_poses=ROBOT_POSES, dt_s=0.05)
+    assert sdf.count("<mu>0</mu><mu2>0</mu2>") == len(ROBOT_POSES)
+
+
 def test_the_step_size_matches_dt_s_exactly(lot: LotSpec) -> None:
     sdf = generate_world_sdf(lot, occupied_space_ids=(), robot_poses=ROBOT_POSES, dt_s=0.05)
     assert "<max_step_size>0.05</max_step_size>" in sdf

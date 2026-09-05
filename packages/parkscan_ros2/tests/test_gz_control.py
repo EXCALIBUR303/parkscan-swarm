@@ -15,6 +15,7 @@ import time
 
 import pytest
 from parkscan_ros2.bridge.gz_control import GzControl, GzControlError
+from parkscan_ros2.bridge.gz_control import _default_runner as default_runner
 
 
 def _ok_runner(argv: list[str], timeout_s: float) -> tuple[int, str]:
@@ -127,6 +128,29 @@ def test_control_and_stats_topic_names_are_world_scoped() -> None:
     gc = GzControl("ParkScan_synthetic_lot_A", runner=_ok_runner)
     assert gc.control_topic == "/world/ParkScan_synthetic_lot_A/control"
     assert gc.stats_topic == "/world/ParkScan_synthetic_lot_A/stats"
+
+
+def test_default_runner_converts_a_subprocess_timeout_into_a_failure_not_an_exception() -> None:
+    """The bug this pins: found running the real system under load, where a `gz
+    service` call itself hung. `subprocess.run`'s own `timeout` argument raises
+    `TimeoutExpired` -- `check=False` only suppresses raising on a non-zero *exit
+    code*, not on a timeout -- and that exception was escaping uncaught all the way
+    into the bridge's MQTT callback, crashing it. A real, slow subprocess (not a mock)
+    exercises the actual `subprocess.run` timeout path this depends on."""
+    code, output = default_runner(["sleep", "5"], 0.05)
+    assert code != 0
+    assert "timed out" in output
+
+
+def test_step_raises_gzcontrolerror_not_timeoutexpired_when_the_subprocess_hangs() -> None:
+    """End-to-end through GzControl.step(), using the real default runner (not a fake)
+    -- this is the exact call chain that crashed the bridge node before the fix."""
+    def hanging_runner(argv: list[str], timeout_s: float) -> tuple[int, str]:
+        return default_runner(["sleep", "5"], timeout_s)
+
+    gc = GzControl("test_world", runner=hanging_runner, service_timeout_s=0.05)
+    with pytest.raises(GzControlError, match="refused"):
+        gc.step(1)
 
 
 def _bump(gc: GzControl, value: int) -> None:

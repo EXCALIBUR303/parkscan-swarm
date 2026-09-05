@@ -16,6 +16,16 @@ not vehicle dynamics realism -- modelling wheels would add detail nothing here m
 Mass and inertia values exist only because SDF's physics engine requires *some* finite
 numbers to integrate; they are round, plausible figures, not a measurement of anything.
 
+Friction on the collision surface is explicitly zeroed (``mu`` / ``mu2``), for a reason
+found empirically, not assumed: DART's default friction measurably damps
+``VelocityControl``'s commanded velocity against the ground plane's contact patch --
+commanding 0.8 m/s and measuring the robot's actual reported velocity a full 10 s later
+(steady-state, not a transient) gave ~0.31 m/s, a real and repeatable ~61% loss verified
+against a running Gazebo. Zero friction restored tracking to float precision of
+commanded. ``SimLite`` has no friction model to lose against in the first place, so this
+keeps the two backends comparable rather than one silently damping motion the other does
+not -- consistent with this module's stated goal of parity, not dynamics realism.
+
 The lidar sensor is configured to :data:`LIDAR_N_RAYS` / :data:`LIDAR_FOV_RAD` /
 :data:`LIDAR_MAX_RANGE_M` -- the exact values of
 ``parkscan_sim.sensors.SensorParams``'s defaults, duplicated here as plain constants
@@ -231,6 +241,7 @@ def _robot_model(robot_id: str, x_m: float, y_m: float, theta_rad: float) -> str
         '        <collision name="collision">\n'
         f"          <geometry><cylinder><radius>{radius}</radius>"
         f"<length>{height}</length></cylinder></geometry>\n"
+        "          <surface><friction><ode><mu>0</mu><mu2>0</mu2></ode></friction></surface>\n"
         "        </collision>\n"
         '        <visual name="visual">\n'
         f"          <geometry><cylinder><radius>{radius}</radius>"
