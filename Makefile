@@ -46,9 +46,19 @@ up-native: ## Start PostGIS + MQTT natively via Homebrew (no Docker needed)
 	@brew services start mosquitto     >/dev/null 2>&1 || true
 	@echo "native services started. Ensure DATABASE_URL in .env points at port 5432."
 
+.PHONY: up-ros2
+up-ros2: ## Start Postgres/MQTT plus the ros2-gz backend (ADR-0008; additive, opt-in)
+	@docker info >/dev/null 2>&1 || { \
+	  echo "Docker daemon is not running. Start Docker Desktop."; exit 1; }
+	$(COMPOSE) --profile ros2 up -d --build
+	@echo "waiting for database..."
+	@for i in $$(seq 1 40); do \
+	  [ "$$($(COMPOSE) ps --format '{{.Health}}' db 2>/dev/null)" = "healthy" ] && break; sleep 2; done
+	$(COMPOSE) --profile ros2 ps
+
 .PHONY: down
 down: ## Stop the Docker Compose stack
-	$(COMPOSE) down
+	$(COMPOSE) --profile ros2 down
 
 .PHONY: db-create
 db-create: ## Create the database and enable PostGIS (idempotent)

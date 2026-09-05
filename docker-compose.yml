@@ -44,5 +44,23 @@ services:
       timeout: 5s
       retries: 5
 
+  # The ros2-gz backend (ADR-0001, ADR-0002, ADR-0008). Additive only, per those ADRs'
+  # own stated scope: `docker compose --profile ros2 up` opts in explicitly; `up`
+  # without the profile (the default `make up` path) never starts or builds this.
+  ros2-gz:
+    profiles: ["ros2"]
+    build:
+      context: .
+      dockerfile: infra/ros2/Dockerfile
+    platform: linux/arm64
+    environment:
+      MQTT_HOST: mqtt
+      MQTT_PORT: "1883"
+      ROBOTS: robot_1,robot_2,robot_3
+      WORLD_NAME: ParkScan_synthetic_lot_A
+    depends_on:
+      mqtt:
+        condition: service_healthy
+
 volumes:
   pgdata:
