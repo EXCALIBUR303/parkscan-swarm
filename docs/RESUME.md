@@ -55,11 +55,13 @@ and reported the null result as null.
 
 Volunteer these; each is documented in the README's Limitations section.
 
-- **It is not a ROS 2 system, yet.** The second backend's gating spike (real-time factor) has
-  passed on this host (~1.0); ADR-0008 designs the bridge it needs and that design has been
-  verified against a real Gazebo Sim Server and `ros_gz_bridge` (a world SDF generator and a
-  Gazebo control wrapper exist, unit-tested), but `Ros2WorldBackend` itself is not built — the
-  adapter still has one running implementation.
+- **It is a ROS 2 system now, on a realistic run, not yet on a long one.** The second backend
+  (`Ros2WorldBackend`, an `rclpy` bridge, a Gazebo world) is built and was proven for real:
+  `apps/runner --backend ros2-gz` against the actual `docker compose --profile ros2` stack
+  assigned zones and drove all three robots with zero coordinator/agent code changes. A 100-step
+  run completed cleanly; a 600-step run failed on transport overhead from the per-tick control
+  channel (ADR-0008 has the finding). `rmw_zenoh_cpp` is also not yet configured. Second working
+  implementation, not yet an equally trusted one on sustained runs.
 - **The reservation layer is integrated for charging bays, not for lane segments.** Leases,
   fencing tokens and the aging queue are implemented, unit-tested, and now called by
   `Coordinator._manage_bay_lease` for bay arbitration — the general per-lane-segment case
@@ -75,6 +77,6 @@ Volunteer these; each is documented in the README's Limitations section.
 
 ## Scale
 
-195 files · ~13k lines of Python and TypeScript · 787 Python + 74 web tests · ruff, mypy
+205 files · ~13k lines of Python and TypeScript · 826 Python + 74 web tests · ruff, mypy
 `--strict` and TypeScript strict clean across the repo · 8 architecture decision records,
 including two that record what was rejected and why.

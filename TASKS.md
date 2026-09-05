@@ -116,23 +116,36 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done & verified · `[!]` blocke
   namespace scheme, the MQTT bridge wire protocol (didn't exist in any doc), lockstep timing
   via Gazebo's world control service (not wall-clock sleep — the Protocol forbids that), where
   battery tracking lives, and the seed-reproducibility gap vs. `SimLite` stated explicitly.
-- [x] **STOPPED HERE, deliberately, at a checkpoint (2026-09-05).** Verified the design against
-  a real Gazebo Sim Server v8.11.0 + `ros_gz_bridge` in a manually-provisioned dev container —
-  found and fixed 3 real, previously-undocumented bugs along the way (a topic-scoping collision
-  between robots, `multi_step` needing to be paired with `pause: true` or it just unpauses
-  indefinitely, and an odometry velocity estimator that reports garbage for ~10 samples after
-  reset). Built and unit-tested `packages/parkscan_ros2`: `sdf.py` (world generator, 8 tests) and
-  `bridge/gz_control.py` (the lockstep wrapper, 12 tests). `battery.py` relocated to
-  `parkscan_core` so a second backend package doesn't have to depend on a peer one for it.
-  **Not built:** the `ros:jazzy-ros-base` Dockerfile, a committed `docker-compose` service,
-  `rmw_zenoh_cpp` configuration (verification used the base image's default RMW — see ADR-0008's
-  new "scope note" on why that may not even be required by this specific MQTT-relay design), the
-  rclpy bridge node's actual MQTT relay logic, `Ros2WorldBackend` itself, and runner `--backend`
-  plumbing. Offered the choice to keep building to full completion or stop here; stopped here.
-- [ ] `ros:jazzy-ros-base` arm64 Dockerfile (`http://packages.ros.org`, `libgl1-mesa-dri`, ogre2)
-- [ ] `rmw_zenoh_cpp` + router; one world, 3 namespaces
-- [ ] `Ros2WorldBackend` implementing the same Protocol; MQTT bridge
-- [ ] **Verify:** identical coordinator/perception code runs unmodified on both backends
+- [x] **Full implementation, built and run for real (2026-09-05).** `packages/parkscan_ros2`:
+  `sdf.py` (world generator), `bridge/gz_control.py` (Gazebo lockstep control), `bridge/protocol.py`
+  (the MQTT wire format), `bridge/geometry.py`, `bridge/node.py` (the rclpy bridge — the one
+  module that imports `rclpy`, excluded from this project's mypy for that reason, verified by
+  running it instead), and `backend.py` (`Ros2WorldBackend`). `battery.py` relocated to
+  `parkscan_core` so a second backend doesn't depend on a peer one for it. 60+ tests across
+  everything host-testable. Six real, previously-undocumented bugs found and fixed by actually
+  running the system, not by reading a manual — see ADR-0008 for all six in full: a per-robot
+  topic-scoping collision, `multi_step` needing `pause: true` paired with it, an odometry
+  velocity warm-up artifact, DART's default friction damping commanded velocity by ~61%, a reset
+  warm-up needing several stepped chunks rather than one iteration, and an uncaught
+  `subprocess.TimeoutExpired` that was crashing the bridge's MQTT callback.
+- [x] `ros:jazzy-ros-base` arm64 Dockerfile (`http://packages.ros.org`, `libgl1-mesa-dri`, ogre2)
+  → `infra/ros2/Dockerfile` + `infra/ros2/entrypoint.sh`, multi-stage (a throwaway stage renders
+  the SDF at build time so the runtime image never needs `parkscan_core`). Built and run for
+  real via `docker compose --profile ros2 build && up`, not merely written.
+- [ ] `rmw_zenoh_cpp` + router — **not done.** Verification used the base image's default RMW;
+  ADR-0008's scope note explains why this specific MQTT-relay design may not even need it (no
+  ROS 2 traffic crosses the host/container boundary zenoh was chosen to cross), but proving
+  zenoh out was this bullet's own goal, independent of whether the design strictly requires it.
+- [x] `Ros2WorldBackend` implementing the same Protocol; MQTT bridge — both built, both run for
+  real against the actual compose stack (see below), not just unit-tested against fakes.
+- [x] **Verify:** identical coordinator/perception code runs unmodified on both backends —
+  confirmed for real: `python -m parkscan_runner.run --backend ros2-gz` against the live
+  `docker compose --profile ros2` stack assigned all three zones and moved all three robots,
+  zero changes to `Coordinator`, `RobotAgent`, or the allocator. Confirmed reliable for a
+  realistic, moderate-length run (100 steps, clean). **Not yet reliable on long sustained runs**
+  (600 steps failed on `gz-transport` overhead from spawning a subprocess per `step()` call —
+  ADR-0008's sixth finding; a real, deferred throughput limitation, not a correctness bug in
+  what does complete).
 
 ---
 

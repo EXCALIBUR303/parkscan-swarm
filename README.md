@@ -61,8 +61,9 @@ owns 5432, and silently connecting to the wrong database is a bad first-run expe
 | `make demo` / `demo-watch` / `demo-dock` | single robot; real-time; near-flat battery so it must return and dock |
 | `make bench` | 30 seeds × 3 allocation strategies → `apps/runner/results/` |
 | `make eval` | geolocation accuracy vs known truth, binned by range → `apps/eval/results/` |
-| `make test` · `make lint` | 767 Python + 74 web tests; ruff, mypy --strict, eslint, tsc |
+| `make test` · `make lint` | 787 Python + 74 web tests; ruff, mypy --strict, eslint, tsc |
 | `make licence-guard` | fails if an AGPL/PML model dependency appears ([ADR-0006](docs/adr/0006-detector-licensing.md)) |
+| `make up-ros2` | additionally builds and starts the `ros2-gz` backend ([ADR-0008](docs/adr/0008-ros2-backend-bridge-design.md)) — opt-in, not part of `make up` |
 
 **Without Docker:** `brew install postgis mosquitto && make up-native`. The stack is designed
 so the daemon is optional — though that path is documented rather than exercised.
@@ -172,15 +173,17 @@ ordinary routes — and the design switched to atomic per-leg acquisition; and
 
 Stated up front, because a portfolio project that hides these is worth less than one that names them.
 
-- **This is not a ROS 2 system.** ROS 2 does not support macOS on arm64, so the default backend
-  is a purpose-built deterministic simulator. The `ros2-gz` backend's gating RTF spike has passed
-  (~1.0, [ROADMAP](docs/ROADMAP.md)) and its design ([ADR-0001](docs/adr/0001-two-simulation-backends.md),
+- **It is now, sometimes, a ROS 2 system — but not yet a reliable one on long runs.** ROS 2 does
+  not support macOS on arm64, so the default backend is a purpose-built deterministic simulator.
+  The `ros2-gz` backend ([ADR-0001](docs/adr/0001-two-simulation-backends.md),
   [ADR-0002](docs/adr/0002-ros2-jazzy-over-lyrical.md), [ADR-0008](docs/adr/0008-ros2-backend-bridge-design.md))
-  has been verified against a real Gazebo Sim Server and `ros_gz_bridge` — a world SDF generator
-  and a Gazebo lockstep control wrapper exist and are unit-tested (`packages/parkscan_ros2`) —
-  but **`Ros2WorldBackend` itself does not exist yet**, stopped deliberately at that checkpoint.
-  Until it does, the `WorldBackend` abstraction has one running implementation and is an
-  unproven claim.
+  — a Gazebo world, an `rclpy` bridge, and `Ros2WorldBackend` talking to it over MQTT — is built
+  and was run for real: `apps/runner --backend ros2-gz` against the actual built
+  `docker compose --profile ros2` stack assigned zones and moved all three robots with zero
+  changes to `Coordinator` or `RobotAgent`. Confirmed clean at a realistic 100-step run; a longer
+  600-step run failed on transport overhead from the current per-tick subprocess control channel
+  (ADR-0008 has the full finding). `rmw_zenoh_cpp` is also not yet configured. Until both are
+  resolved, `ros2-gz` is a second working implementation, not yet an equally trusted one.
 - **The reservation layer is wired in for charging bays, not for lane segments.**
   `parkscan_coord.leases` implements atomic acquisition, TTL leases, fencing tokens and an
   aging FIFO queue. `Coordinator._manage_bay_lease` now calls it every tick a robot is

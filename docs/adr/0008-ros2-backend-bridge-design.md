@@ -1,10 +1,18 @@
 # ADR-0008 — `Ros2WorldBackend`: namespace scheme, lockstep timing, and the MQTT bridge
 
-**Status:** Proposed, design verified against a real Gazebo + `ros_gz_bridge`, foundation built
-(`packages/parkscan_ros2`'s SDF generator and `GzControl`) — **`Ros2WorldBackend` itself and the
-bridge's MQTT relay are not implemented; stopped here deliberately at a checkpoint (see
-TASKS.md's Phase S entry for 2026-09-05)** · **Extends:** ADR-0001, ADR-0002 · **Gated by:** the
-RTF spike in `docs/ROADMAP.md` (passed, RTF ≈ 1.0)
+**Status:** Accepted and implemented. `Ros2WorldBackend`, the bridge node's MQTT relay, the SDF
+generator, `GzControl`, the `ros2-gz` Dockerfile and compose service, and runner `--backend`
+selection all exist and were run for real, end to end, through `apps/runner`'s own CLI against
+the actual built `docker compose --profile ros2` stack — the coordinator assigned zones, every
+robot began navigating, telemetry published — with zero code changes to `Coordinator`,
+`RobotAgent`, or the allocator. Confirmed reliable for realistic, moderate-length runs (100
+steps, clean). **Not fully reliable yet: a longer run (600 steps) failed** on a `gz-transport`
+`Host unreachable` error, traced to the per-`step()`-call subprocess overhead in `GzControl` —
+see the sixth finding below for what that means and why fixing it is a larger, deferred change.
+**Also not done: `rmw_zenoh_cpp` is not configured** (verification used the base image's default
+RMW; see the scope note below for why this specific design may not even need it) ·
+**Extends:** ADR-0001, ADR-0002 · **Gated by:** the RTF spike in `docs/ROADMAP.md` (passed,
+RTF ≈ 1.0)
 
 ## Context
 
@@ -181,7 +189,71 @@ has no honest reading above that bound to trust, and an unclamped spike would ot
 fresh reset's battery by a real, if small, spurious amount (a single 160 m/s tick alone costs
 ~0.6% of a 20 Wh pack — `discharge_power_w(160, BatteryParams()) * 0.05 / 3600 / 20`). This is a
 clamp on an already-known-bogus reading, not a general noise filter, and should not be read as
-license to distrust the sensor more broadly than this one measured failure mode.
+license to distrust the sensor more broadly than this one measured failure mode. **Reproduced
+again, independently, once the full pipeline was wired end to end:** a live run through the real
+bridge (Gazebo → `ros_gz_bridge` → this node → MQTT, no fakes anywhere) showed the exact same
+signature — three robots reporting `160.0`, `160.0`, `50.0` m/s immediately after their first
+`multi_step` — confirming this is a structural property of the plugin, not an artifact of the
+narrower probe that first found it.
+
+**A fourth empirical finding, found closing out this same end-to-end pass:**
+`gz-sim-velocity-control-system`'s commanded velocity is measurably damped by DART's default
+ground-contact friction. Commanded `0.8` m/s on `/robot_1/cmd_vel`, then measured the robot's
+*actual* reported velocity a full 10 real seconds later (steady-state, confirmed flat across 200
+further physics iterations, not a transient still settling): `~0.309` m/s — a real, repeatable
+~61% loss. Setting `mu`/`mu2` to `0` on the robot's collision surface (`parkscan_ros2.sdf`)
+restored tracking to `0.7999999999999983`, float precision of commanded. `SimLite` has no
+friction model to lose motion against in the first place, so leaving Gazebo's default friction in
+place would have made the two backends silently non-comparable — a robot told to drive at
+`max_v_mps` would actually travel measurably slower under `ros2-gz` than under `sim-lite`, with
+no error or warning anywhere. Zero friction is now the SDF's default for every robot.
+
+**A fifth empirical finding, found only by actually running `apps/runner --backend ros2-gz`
+end to end** — not by any of the piece-by-piece verification above, which is exactly why doing
+this final integration run mattered: `reset: {all: true}` costs `ros_gz_bridge` noticeably more
+than one physics iteration before it relays a fresh sample again. Verified with `rclpy` entirely
+out of the picture — `gz service ... reset` then `gz service ... multi_step: 1` then `ros2 topic
+echo /robot_1/odom --once` — the echo timed out. It is not permanently broken: enough further
+stepping eventually produces a sample again, but "enough" is not a fixed, documented number.
+`_handle_reset` now steps in 1-second chunks (`_RESET_WARMUP_CHUNK_ITERATIONS`), checking after
+each chunk whether every robot has actually landed in this node's own cached state, up to a
+bounded ceiling (`_RESET_WARMUP_MAX_CHUNKS` — 15 s of sim time) before giving up and never
+acknowledging, rather than guessing a fixed warm-up count that might not hold on a different
+host or lot. `Ros2WorldBackend.reset()`'s own wait for every robot's first fresh state (already
+in the design, §3's ack-is-not-completion principle) is what makes this safe on the backend side
+even before this fix: it never trusted the reset ack alone.
+
+This is also the run that closed the design's own last open item —
+**"Verify: identical coordinator/perception code runs unmodified on both backends"**
+(`TASKS.md`, `docs/ROADMAP.md`) — for real: `apps/runner`'s actual CLI, talking to the actual
+built `ros2-gz` Docker Compose service, with zero code changes to `Coordinator`, `RobotAgent`, or
+the allocator. The coordinator assigned all three zones, every robot transitioned to
+`RobotState.TRANSIT` and began navigating toward its assignment, and 150 telemetry messages
+published cleanly over 100 steps with no errors on either side of the MQTT connection.
+
+**A sixth empirical finding, and the one place this backend is not yet as reliable as
+`SimLite` for anything beyond a moderate run:** a longer run (600 steps) failed partway through
+with the world control service refusing a step request — `gz`'s own transport layer logged
+`NodeShared::RecvSrvRequest() error sending response: Host unreachable` right before it. §6
+already shells out to the `gz service` CLI once **per `step()` call**, each invocation spawning a
+brand-new process that has to freshly complete `gz-transport`'s own discovery handshake before it
+can even send its request; over enough consecutive calls in one run, that per-call overhead
+appears to degrade into outright failures rather than just added latency. The 100-step run above
+completed cleanly; the 600-step run did not, failing somewhere in between — the exact threshold
+was not pinned down, and root-causing it further (accumulated file descriptors or ephemeral
+ports inside the container's network namespace is one plausible mechanism, not a confirmed one)
+would mean either a persistent `gz-transport` connection (its Python bindings are not installed
+in this environment — the same gap §6 already named) or a different control channel entirely,
+both larger changes than this pass's scope. **One real bug this did surface and fix regardless:**
+`subprocess.run`'s own `timeout` argument raises `TimeoutExpired`, which `check=False` does not
+suppress — that exception was escaping `GzControl`'s default runner uncaught and crashing the
+bridge's MQTT callback outright. Fixed to convert a subprocess timeout into the same
+`(non-zero code, message)` shape a refused service call already produces, so the *existing*
+`GzControlError`-and-no-ack handling covers it too — confirmed by the second run failing
+gracefully (a clean error log, node still alive) rather than crashing the process the way the
+first run did. Stated plainly: this backend is verified working for realistic, moderate-length
+runs; sustained long runs need either a higher tolerance for occasional step failures or the
+architectural change above before they can be trusted the way `SimLite` already is.
 
 ### 5. Reset/seed semantics — the reproducibility gap, stated not hidden
 
@@ -298,17 +370,48 @@ Gazebo" quietly stand in for "verified with the RMW this project actually chose.
   undocumented bugs (missing `setup.bash` sourcing, `-v 4` not actually reporting RTF) were
   found only by running it.
 
-## What was actually built, and what still is not
+## What was actually built, and how it was verified
 
-Updated after the fact: verifying this design against a real Gazebo turned into writing real,
-tested code, not just checking assumptions. Built and committed: the `.sdf` generator
-(`parkscan_ros2/sdf.py`) and the Gazebo lockstep control wrapper (`parkscan_ros2/bridge/gz_control.py`),
-both unit-tested and both exercised against a real `gz sim` + `ros_gz_bridge` in a manually
-provisioned dev container. **Not built**, and this is where implementation deliberately stopped:
-the bridge node's actual MQTT relay logic (§6's wire protocol — `GzControl` handles the Gazebo
-side of `control/step`/`control/reset` but nothing publishes `state` or subscribes `cmd` yet),
-`Ros2WorldBackend` itself, the `ros:jazzy-ros-base` Dockerfile, any Zenoh router configuration
-(see the scope note above), and the `docker-compose` service. This ADR remains the design those
-should be built against — matching the project's own pattern of a design review preceding
-implementation for every phase complex enough to warrant one — but "reviewed" here also means
-"partially built and load-tested," not only "written down."
+Updated after the fact, three times now: verifying this design against a real Gazebo turned into
+writing real, tested code, not just checking assumptions; that code turned into a full
+implementation; and the full implementation was then run for real, end to end, through
+`apps/runner`'s own CLI against the actual built `docker compose --profile ros2` stack — not
+stopped at "each piece works in isolation." Built, tested, and committed:
+
+- `parkscan_ros2/sdf.py` — the world generator (unit-tested; the actual generated SDF loaded
+  cleanly in a real Gazebo Sim Server v8.11.0, all three robots' plugins working, zero friction on
+  every collision surface per the fourth finding below).
+- `parkscan_ros2/bridge/gz_control.py` — the Gazebo lockstep control wrapper (unit-tested,
+  including the subprocess-timeout-to-`GzControlError` conversion the sixth finding below needed;
+  the real `multi_step`/`pause`/`reset` semantics it encodes were separately confirmed against a
+  live `gz sim`).
+- `parkscan_ros2/bridge/protocol.py` — the MQTT wire format (unit-tested standalone; confirmed
+  byte-for-byte against real messages published by the real bridge over a real broker).
+- `parkscan_ros2/bridge/geometry.py` — the quaternion-to-yaw conversion (unit-tested).
+- `parkscan_ros2/bridge/node.py` — the rclpy bridge node. Cannot be unit-tested (no `rclpy` on
+  this host — excluded from this project's mypy run for that exact reason) but was run for real,
+  repeatedly, through the full `docker compose --profile ros2` stack: a `control/step` MQTT
+  request produces a matching `step_ack` and fresh `state` messages for all three robots with
+  correct pose and exactly 37 lidar ranges each; a `cmd` MQTT message reaches the robot and moves
+  it; `_handle_reset`'s chunked warm-up (the fifth finding below) reliably produces fresh state
+  after a reset before acknowledging it.
+- `parkscan_ros2/backend.py` — `Ros2WorldBackend` (unit-tested against a fake, dependency-injected
+  MQTT client covering the exact scenarios this ADR's findings describe — the velocity clamp, the
+  docked-vs-draining branch, the ack race found and fixed the moment tests ran synchronously; then
+  run for real, unmocked, as `apps/runner`'s actual backend against the actual compose stack).
+- `infra/ros2/Dockerfile`, `infra/ros2/entrypoint.sh`, and the `docker-compose.yml` `ros2-gz`
+  service (`--profile ros2`, additive only) — built, and the actual committed files were the ones
+  built and run (`docker compose --profile ros2 build && up`), not a close approximation of them.
+  The entrypoint's own `set -u` conflicted with `/opt/ros/jazzy/setup.bash` itself referencing an
+  unbound variable — found by running the real container, fixed to `set -eo pipefail`.
+- `apps/runner`'s `--backend {sim-lite,ros2-gz}` flag (ADR-0008 §7) — run for real, not just
+  wired: `python -m parkscan_runner.run --backend ros2-gz` against the live stack assigned all
+  three zones and moved all three robots with zero coordinator/agent code changes.
+
+**Not done:** `rmw_zenoh_cpp` router configuration (the scope note above), and reliability on long
+sustained runs (the sixth finding below — confirmed clean at 100 steps, failed at 600). Six
+genuine, previously-undocumented bugs were found and fixed by actually running this system, not
+by reading any manual: the per-robot topic-scoping collision, the `multi_step`/`pause` pairing
+requirement, the odometry velocity warm-up artifact, DART's default friction damping commanded
+velocity, the reset warm-up needing several chunks rather than one iteration, and
+`subprocess.run`'s `timeout` argument raising uncaught past `check=False`.
