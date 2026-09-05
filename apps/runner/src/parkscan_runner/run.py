@@ -24,7 +24,7 @@ import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import Literal, cast
 
 import aiomqtt
 import structlog
@@ -38,6 +38,7 @@ from parkscan_perception.geolocation import (
     geolocate_detection,
 )
 from parkscan_perception.simulated import SimulatedDetector
+from parkscan_ros2.backend import Ros2BackendConfig, Ros2WorldBackend
 from parkscan_sim.config import SimConfig
 from parkscan_sim.world import SimLite
 
@@ -69,6 +70,12 @@ class RunnerConfig:
     run_id: str = "dev"
     mqtt_host: str = "127.0.0.1"
     mqtt_port: int = 1883
+    backend: Literal["sim-lite", "ros2-gz"] = "sim-lite"
+    """Which ``WorldBackend`` to construct (ADR-0008). ``ros2-gz`` talks to the bridge
+    over the same MQTT broker named by ``mqtt_host``/``mqtt_port`` -- the internal
+    bridge protocol (``parkscan_ros2.bridge.protocol``) lives on its own topic
+    namespace, distinct from this runner's own app-level publishing, so one broker
+    serves both without collision."""
     max_steps: int = 20_000
     realtime: bool = False
     publish_every: int = 2
@@ -96,17 +103,41 @@ def topic(run_id: str, robot_id: str, suffix: str) -> str:
     return f"parkscan/v1/{run_id}/robot/{robot_id}/{suffix}"
 
 
+def _build_backend(cfg: RunnerConfig) -> WorldBackend:
+    """Construct the backend ``cfg.backend`` names, both already typed as ``WorldBackend``
+    — this is the one place ADR-0008 §7 says is exempt from "unmodified": the
+    coordinator/agent/perception layers never see which backend they were given.
+    """
+    if cfg.backend == "sim-lite":
+        return SimLite(SimConfig())
+    # "ros2-gz": robot ids are fixed at ADR-0008's own namespace convention
+    # (robot_1, robot_2, ... -- matching SimLite.robots() and DATA_MODEL's robot.id
+    # values), since Ros2WorldBackend needs them at construction, before reset() has
+    # any lot to discover them from.
+    robot_ids = tuple(f"robot_{i + 1}" for i in range(cfg.robots))
+    config = Ros2BackendConfig(mqtt_host=cfg.mqtt_host, mqtt_port=cfg.mqtt_port)
+    return Ros2WorldBackend(robot_ids, config=config)
+
+
 class Runner:
     """One simulation run."""
 
     def __init__(self, cfg: RunnerConfig) -> None:
         self._cfg = cfg
         self._lot: LotSpec = load_lot(cfg.lot_path)
-        self._backend: WorldBackend = SimLite(SimConfig())
+        self._backend: WorldBackend = _build_backend(cfg)
         self._backend.reset(cfg.seed, self._lot)
         if cfg.start_soc is not None:
-            for robot_id in self._backend.robots():
-                self._backend.set_battery_soc(robot_id, cfg.start_soc)
+            # SimLite-only: an extension method outside the WorldBackend Protocol, the
+            # same shape as _perceive()'s isinstance branch below. Ros2WorldBackend has
+            # no equivalent (ADR-0008 §5: only initial SOC is seed-derived, and even
+            # that is not overridable post-reset without a fresh Gazebo reset), so this
+            # debug convenience is sim-lite only until/unless that changes.
+            if isinstance(self._backend, SimLite):
+                for robot_id in self._backend.robots():
+                    self._backend.set_battery_soc(robot_id, cfg.start_soc)
+            else:
+                log.warning("start_soc_ignored", backend=cfg.backend)
         # A single wall-clock instant, captured once, that the sim clock is offset from.
         self._epoch = dt.datetime.now(dt.UTC)
 
@@ -315,6 +346,13 @@ def parse_args(argv: Sequence[str] | None = None) -> RunnerConfig:
     parser.add_argument("--run-id", default="dev")
     parser.add_argument("--mqtt-host", default="127.0.0.1")
     parser.add_argument("--mqtt-port", type=int, default=1883)
+    parser.add_argument(
+        "--backend",
+        choices=["sim-lite", "ros2-gz"],
+        default="sim-lite",
+        help="WorldBackend to run against (ADR-0008); ros2-gz needs the ros2-gz compose "
+        "profile running and reachable at --mqtt-host/--mqtt-port",
+    )
     parser.add_argument("--lot", type=Path, default=DEFAULT_LOT)
     parser.add_argument(
         "--start-soc",
@@ -334,6 +372,7 @@ def parse_args(argv: Sequence[str] | None = None) -> RunnerConfig:
         run_id=args.run_id,
         mqtt_host=args.mqtt_host,
         mqtt_port=args.mqtt_port,
+        backend=args.backend,
         max_steps=args.steps,
         realtime=args.realtime,
         robots=args.robots,

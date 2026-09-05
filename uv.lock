@@ -580,6 +580,7 @@ dependencies = [
     { name = "aiomqtt" },
     { name = "parkscan-agent" },
     { name = "parkscan-core" },
+    { name = "parkscan-ros2" },
     { name = "parkscan-sim" },
     { name = "structlog" },
 ]
@@ -589,6 +590,7 @@ requires-dist = [
     { name = "aiomqtt", specifier = "==2.5.1" },
     { name = "parkscan-agent", editable = "packages/parkscan_agent" },
     { name = "parkscan-core", editable = "packages/parkscan_core" },
+    { name = "parkscan-ros2", editable = "packages/parkscan_ros2" },
     { name = "parkscan-sim", editable = "packages/parkscan_sim" },
     { name = "structlog", specifier = "==26.1.0" },
 ]

@@ -7,6 +7,7 @@ dependencies = [
   "parkscan-core",
   "parkscan-sim",
   "parkscan-agent",
+  "parkscan-ros2",
   "aiomqtt==2.5.1",
   "structlog==26.1.0",
 ]
